@@ -533,8 +533,7 @@ my $colnames_rv = spi_exec_query($colnames_q);
 if( $colnames_rv->{'processed'} == 0 )
 {
     my $q = "select audit_log.fn_drop_audit_event_log_trigger('$table_name')";
-    #eval{ spi_exec_query($q) };
-    spi_exec_query($q);
+    eval{ spi_exec_query($q) };
     return;
 }
 
@@ -567,14 +566,14 @@ my $fn_q = "CREATE OR REPLACE FUNCTION "
          . "        my_row_pk_val := OLD.$pk_col;\n"
          . "    end if;\n\n"
          . "    if( TG_OP = 'DELETE' ) then\n"
-         . "        my_new_row = OLD;\n"
+         . "        my_new_row := OLD;\n"
          . "    else\n"
-         . "        my_new_row = NEW;\n"
+         . "        my_new_row := NEW;\n"
          . "    end if;\n\n"
          . "    if( TG_OP = 'INSERT' ) then\n"
-         . "        my_old_row = NEW;\n"
+         . "        my_old_row := NEW;\n"
          . "    else\n"
-         . "        my_old_row = OLD;\n"
+         . "        my_old_row := OLD;\n"
          . "    end if;\n\n";
 
 foreach my $row (@{$colnames_rv->{'rows'}})
@@ -611,13 +610,13 @@ $fn_q .= "    return NEW; \n"
       .  " \$_\$ \n"
       .  "    language 'plpgsql'; ";
 
-elog(NOTICE, $fn_q);
+#elog(NOTICE, $fn_q);
 eval { spi_exec_query($fn_q) };
 
 my $tg_q = "CREATE TRIGGER tr_log_audit_event_$table_name "
          . "   after insert or update or delete on $table_name for each row "
          . "   execute procedure audit_log.fn_log_audit_event_$table_name()";
-elog(NOTICE, $tg_q);
+#elog(NOTICE, $tg_q);
 eval { spi_exec_query($tg_q) };
  $_$
     language 'plperl';

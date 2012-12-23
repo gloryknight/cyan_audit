@@ -1,3 +1,6 @@
+create table tt_active_audit_fields as
+select * from tb_audit_field where active;
+
 update tb_audit_field set active = false;
 
 drop function if exists public.fn_archive_audit_events(interval);
@@ -22,8 +25,10 @@ alter table tb_audit_transaction        set schema audit_log;
 alter table tb_audit_transaction_type   set schema audit_log;
 alter table tb_audit_event              set schema audit_log;
 alter table tb_audit_event_current      set schema audit_log;
+drop view vw_audit_log;
+drop view vw_audit_transaction_statement;
 
-alter table audit_log.tb_audit_event drop column audit_event;
+-- alter table audit_log.tb_audit_event drop column audit_event;
 
 alter table audit_log.tb_audit_event rename column transaction_id to txid;
 alter table audit_log.tb_audit_transaction rename column transaction_id to txid;
@@ -34,7 +39,9 @@ alter table audit_log.tb_audit_event
     alter column op_sequence set default nextval('audit_log.sq_op_sequence'),
     alter column txid set default txid_current(),
     alter column pid set default pg_backend_pid();
-
+alter table audit_log.tb_audit_transaction
+    drop column audit_transaction;
+alter table audit_log.tb_audit_transaction add primary key(txid);
 
 
 drop index if exists audit_log.tb_audit_event_transaction_id_idx;
@@ -44,3 +51,18 @@ drop index if exists audit_log.tb_audit_event_current_transaction_id_idx;
 drop index if exists audit_log.tb_audit_event_current_recorded_idx;
 drop index if exists audit_log.tb_audit_event_current_audit_field_idx;
 
+
+drop sequence sq_pk_audit_event;
+drop sequence sq_pk_audit_transaction;
+
+alter sequence sq_pk_audit_data_type set schema audit_log;
+alter sequence sq_pk_audit_field set schema audit_log;
+alter sequence sq_pk_audit_transaction_type set schema audit_log;
+
+
+alter sequence sq_pk_audit_data_type 
+    owned by audit_log.tb_audit_data_type.audit_data_type;
+alter sequence sq_pk_audit_field
+    owned by audit_log.tb_audit_field.audit_field;
+alter sequence sq_pk_audit_transaction_type
+    owned by audit_log.tb_audit_transaction_type.audit_transaction_type;
