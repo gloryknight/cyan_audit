@@ -41,7 +41,7 @@ alter table audit_log.tb_audit_event
     alter column pid set default pg_backend_pid();
 alter table audit_log.tb_audit_transaction
     drop column audit_transaction;
-alter table audit_log.tb_audit_transaction add primary key(txid);
+-- alter table audit_log.tb_audit_transaction add primary key(txid);
 
 
 drop index if exists audit_log.tb_audit_event_transaction_id_idx;

@@ -14,7 +14,7 @@ create or replace language plperl;
 create or replace language plpgsql;
 
 -- audit_log schema, to hold archived events
--- create schema audit_log;
+create schema audit_log;
 
 ------------------------
 ------ FUNCTIONS ------
@@ -164,7 +164,7 @@ declare
     my_data_type    varchar;
 begin
     select t.typname::information_schema.sql_identifier
-      into strict my_data_type
+      into my_data_type
       from pg_attribute a
       join pg_class c on a.attrelid = c.oid
       join pg_namespace n on c.relnamespace = n.oid
@@ -223,7 +223,7 @@ begin
      where label = in_label;
 
     if not found then
-        my_audit_transaction_type := nextval('audit_log.sq_pk_audit_transaction_type');
+        my_audit_transaction_type := nextval('sq_pk_audit_transaction_type');
 
         insert into audit_log.tb_audit_transaction_type
                     (
@@ -257,15 +257,9 @@ begin
     select audit_log.fn_get_or_create_audit_transaction_type(in_label)
       into my_audit_transaction_type;
 
-    update tb_audit_transaction
+    update tb_audit_event_current
        set audit_transaction_type = my_audit_transaction_type
      where txid = in_txid;
-
-    if not found then
-        insert into audit_log.tb_audit_transaction 
-                    ( txid, audit_transaction_type ) 
-             values ( in_txid, my_audit_transaction_type );
-    end if;
 
     return in_txid;
 end
@@ -325,9 +319,9 @@ begin
              join audit_log.tb_audit_field af using(audit_field)
              join audit_log.tb_audit_field afpk on af.table_pk = afpk.audit_field
             where ae.txid = in_txid
-         group by ae.op_sequence, af.table_name, ae.row_op, afpk.column_name, 
+         group by af.table_name, ae.row_op, afpk.column_name, 
                   ae.row_pk_val
-         order by ae.op_sequence desc
+         order by ae.recorded desc
     loop
         execute my_statement;
         return next my_statement;
@@ -369,7 +363,7 @@ begin
      where name = in_type_name;
 
     if not found then
-        my_audit_data_type := nextval('audit_log.sq_pk_audit_data_type');
+        my_audit_data_type := nextval('sq_pk_audit_data_type');
 
         insert into audit_log.tb_audit_data_type( audit_data_type, name ) 
             values( my_audit_data_type, in_type_name );
@@ -458,7 +452,7 @@ returns void as
  $_$
 begin
     if (in_row_op = 'UPDATE' and 
-        in_old_value is not distinct from in_new_value) OR
+        in_old_value::text is not distinct from in_new_value::text) OR
        (in_row_op = 'INSERT' and 
         in_new_value is null)
     then
@@ -584,8 +578,8 @@ foreach my $row (@{$colnames_rv->{'rows'}})
     $fn_q .= "    IF (TG_OP = 'INSERT' AND\n"
           .  "        my_new_row.$column_name IS NOT NULL) OR\n"
           .  "       (TG_OP = 'UPDATE' AND\n"
-          .  "        my_new_row.$column_name IS DISTINCT FROM\n"
-          .  "        my_old_row.$column_name) OR\n"
+          .  "        my_new_row.${column_name}::text IS DISTINCT FROM\n"
+          .  "        my_old_row.${column_name}::text) OR\n"
           .  "       (TG_OP = 'DELETE')\n"
           .  "    THEN\n"
           .  "        perform audit_log.fn_new_audit_event(\n "
@@ -610,13 +604,13 @@ $fn_q .= "    return NEW; \n"
       .  " \$_\$ \n"
       .  "    language 'plpgsql'; ";
 
-#elog(NOTICE, $fn_q);
+elog(NOTICE, $fn_q);
 eval { spi_exec_query($fn_q) };
 
 my $tg_q = "CREATE TRIGGER tr_log_audit_event_$table_name "
          . "   after insert or update or delete on $table_name for each row "
          . "   execute procedure audit_log.fn_log_audit_event_$table_name()";
-#elog(NOTICE, $tg_q);
+elog(NOTICE, $tg_q);
 eval { spi_exec_query($tg_q) };
  $_$
     language 'plperl';
@@ -644,7 +638,9 @@ begin
            and array_length(cn.conkey, 1) = 1
            and a.attnum > 0
            and a.attisdropped is false
-           and cn.connamespace::regclass::varchar = 'public'
+          join pg_namespace n
+            on cn.connamespace = n.oid
+           and n.nspname::varchar = 'public'
      full join audit_log.tb_audit_field af
             on a.attrelid::regclass::varchar = af.table_name
            and a.attname::varchar = af.column_name
@@ -682,24 +678,20 @@ declare
     my_table_name   varchar;
     my_query        varchar;
 begin
-     if current_setting('transaction_isolation') != 'read uncommitted' then
-         raise exception 'Must be in ISOLATION LEVEL READ UNCOMMITTED';
-     end if;
-
     if (select count(1) from audit_log.tb_audit_event_current) = 0 then
         raise exception 'No events to rotate';
     end if;
 
     -- make a name for the archive table
-    my_table_name := 'audit_log.tb_audit_event_' 
-                  || to_char(now(), 'YYYYMMDD_HH24MI');
+    my_table_name := 'tb_audit_event_' || to_char(now(), 'YYYYMMDD_HH24MI');
 
     -- drop constraint
     alter table tb_audit_event_current 
         drop constraint if exists tb_audit_event_current_recorded_check;
 
     -- rename (archive) table
-    execute 'alter table tb_audit_event_current rename to '||my_table_name;
+    execute 'alter table audit_log.tb_audit_event_current rename to '
+         || my_table_name;
 
     -- create new current table
     create table audit_log.tb_audit_event_current() 
@@ -728,17 +720,17 @@ begin
 
     -- get mins & maxes for creating check constraints
     execute 'select max(recorded), min(recorded), '
-         || '       min(transaction_id), max(transaction_id) '
-         || '  from '||my_table_name
+         || '       min(txid), max(txid) '
+         || '  from audit_log.'||my_table_name
        into my_max_recorded, my_min_recorded,
             my_min_txid, my_max_txid;
 
     -- add check constraints to archived table
-    execute 'alter table '||my_table_name||' add check(recorded between '''
-            ||my_min_recorded||''' and '''||my_max_recorded||''')';
-    execute 'alter table '||my_table_name
-         || '  add check(transaction_id between '''
-         ||     my_min_txid||''' and '''||my_max_txid||''')';
+    execute 'alter table audit_log.' || my_table_name || ' add check(recorded between '''
+         || my_min_recorded || ''' and ''' || my_max_recorded || ''')';
+    execute 'alter table audit_log.' || my_table_name
+         || '  add check(txid between '''
+         ||     my_min_txid || ''' and ''' || my_max_txid || ''')';
 end
  $_$
     language 'plpgsql';
@@ -749,64 +741,77 @@ end
 ------------------
 
 -- tb_audit_data_type
+create sequence audit_log.sq_pk_audit_data_type;
+
 CREATE TABLE IF NOT EXISTS audit_log.tb_audit_data_type
 (
-    audit_data_type serial primary key,
+    audit_data_type integer primary key
+                    default nextval('sq_pk_audit_data_type'),
     name            varchar not null unique
 );
 
+alter sequence audit_log.sq_pk_audit_data_type
+    owned by audit_log.tb_audit_data_type.audit_data_type;
+
+
+
 
 -- tb_audit_field
+create sequence audit_log.sq_pk_audit_field;
+
 CREATE TABLE IF NOT EXISTS audit_log.tb_audit_field
 (
-    audit_field     serial primary key,
+    audit_field     integer primary key default nextval('sq_pk_audit_field'),
     table_name      varchar,
     column_name     varchar,
-    audit_data_type integer not null references tb_audit_data_type,   
-    table_pk        integer not null references tb_audit_field,
+    audit_data_type integer not null references audit_log.tb_audit_data_type,   
+    table_pk        integer not null references audit_log.tb_audit_field,
     active          boolean not null default true,
     CONSTRAINT tb_audit_field_table_column_key UNIQUE(table_name,column_name),
     CONSTRAINT tb_audit_field_tb_audit_event_not_allowed 
         CHECK( table_name not like 'tb_audit_event%' )
 );
 
+alter sequence audit_log.sq_pk_audit_field
+    owned by audit_log.tb_audit_field.audit_field;
+
+
+-- tb_audit_transaction_type
+CREATE SEQUENCE audit_log.sq_pk_audit_transaction_type;
+
+CREATE TABLE IF NOT EXISTS audit_log.tb_audit_transaction_type
+(
+    audit_transaction_type  integer primary key
+                            default nextval('sq_pk_audit_transaction_type'),
+    label                   varchar unique
+);
+
+ALTER SEQUENCE sq_pk_audit_transaction_type
+    owned by audit_log.tb_audit_transaction_type.audit_transaction_type;
 
 -- tb_audit_event
 CREATE TABLE IF NOT EXISTS audit_log.tb_audit_event
 (
-    audit_field     integer not null references tb_audit_field,
-    row_pk_val      integer not null,
-    recorded        timestamp without time zone not null default now(),
-    uid             integer not null,
-    row_op          char(1) not null CHECK (row_op in ('I','U','D')),
-    op_sequence     serial not null,
-    txid            bigint not null default txid_current(),
-    pid             integer not null default pg_backend_pid(),
-    old_value       text,
-    new_value       text
+    audit_field             integer not null 
+                            references audit_log.tb_audit_field,
+    row_pk_val              integer not null,
+    recorded                timestamp not null default clock_timestamp(),
+    uid                     integer not null,
+    row_op                  char(1) not null CHECK (row_op in ('I','U','D')),
+    txid                    bigint not null default txid_current(),
+    pid                     integer not null default pg_backend_pid(),
+    audit_transaction_type  integer 
+                            references audit_log.tb_audit_transaction_type,
+    old_value               text,
+    new_value               text
 );
 
 ALTER TABLE audit_log.tb_audit_event 
     alter column uid set default audit_log.fn_get_audit_uid();
 
--- tb_audit_transaction_type
-CREATE TABLE IF NOT EXISTS audit_log.tb_audit_transaction_type
-(
-    audit_transaction_type  serial primary key,
-    label                   varchar unique
-);
-
--- tb_audit_transaction
-CREATE TABLE IF NOT EXISTS audit_log.tb_audit_transaction
-(
-    txid                    bigint primary key,
-    audit_transaction_type  integer not null 
-                            references tb_audit_transaction_type
-);
-
 -- tb_audit_event_current
 CREATE TABLE IF NOT EXISTS audit_log.tb_audit_event_current() 
-    inherits ( tb_audit_event );
+    inherits ( audit_log.tb_audit_event );
 
 drop index if exists audit_log.tb_audit_event_current_txid_idx;
 drop index if exists audit_log.tb_audit_event_current_recorded_idx;
@@ -845,9 +850,8 @@ CREATE OR REPLACE VIEW audit_log.vw_audit_log as
           ae.new_value
      from audit_log.tb_audit_event ae
      join audit_log.tb_audit_field af using(audit_field)
-left join audit_log.tb_audit_transaction at using(txid)
 left join audit_log.tb_audit_transaction_type att using(audit_transaction_type)
- order by ae.recorded desc, ae.op_sequence desc, af.table_name, af.column_name;
+ order by ae.recorded desc, af.table_name, af.column_name;
 
 
 -- vw_audit_transaction_statement
@@ -880,12 +884,11 @@ CREATE OR REPLACE VIEW audit_log.vw_audit_transaction_statement as
      join audit_log.tb_audit_field afpk on af.table_pk = afpk.audit_field
      join audit_log.tb_audit_data_type adtpk 
        on afpk.audit_data_type = adtpk.audit_data_type
-left join audit_log.tb_audit_transaction at on ae.txid = at.txid
 left join audit_log.tb_audit_transaction_type att using(audit_transaction_type)
- group by af.table_name, ae.row_op, ae.op_sequence, afpk.column_name,
+ group by af.table_name, ae.row_op, afpk.column_name,
           ae.row_pk_val, adtpk.name, ae.txid, ae.recorded,
           att.label, audit_log.fn_get_email_by_audit_uid(ae.uid)
- order by ae.recorded, ae.op_sequence;
+ order by ae.recorded;
 
 
 -----------------------
@@ -925,7 +928,8 @@ CREATE OR REPLACE FUNCTION audit_log.fn_check_audit_field_validity()
 returns trigger as
  $_$
 declare
-    my_pk_col   varchar;
+    my_pk_col           varchar;
+    my_audit_data_type  integer;
 begin
     if TG_OP = 'UPDATE' then
         if NEW.table_name  != OLD.table_name or
@@ -949,9 +953,18 @@ begin
           into NEW.table_pk;
     end if;
 
-    NEW.audit_data_type := audit_log.fn_get_or_create_audit_data_type(
+    my_audit_data_type := audit_log.fn_get_or_create_audit_data_type(
         audit_log.fn_get_column_data_type(NEW.table_name, NEW.column_name)
     );
+
+    if my_audit_data_type is not null then
+        NEW.audit_data_type := my_audit_data_type;
+    else
+        if TG_OP = 'INSERT' then
+            raise exception 'Invalid audit field %.%', 
+                NEW.table_name, NEW.column_name;
+        end if;
+    end if;
 
     return NEW;
 end
@@ -965,4 +978,50 @@ CREATE TRIGGER tr_check_audit_field_validity
     BEFORE INSERT OR UPDATE ON audit_log.tb_audit_field
     FOR EACH ROW EXECUTE PROCEDURE audit_log.fn_check_audit_field_validity();
 
--- select audit_log.fn_update_audit_fields();
+select audit_log.fn_update_audit_fields();
+
+
+--- COMPATIBILITY
+create or replace function fn_expire_procpid_entities() returns void as
+ $_$
+ $_$
+language sql;
+
+create or replace function fn_set_procpid_entity
+(
+    in_entity   integer
+)
+returns integer as
+ $_$
+    select audit_log.fn_set_audit_uid($1);
+ $_$
+language sql;
+
+create or replace function fn_get_procpid_entity() returns integer as
+ $_$
+    select audit_log.fn_get_audit_uid();
+ $_$
+language sql;
+
+
+--- PERMISSIONS
+
+grant usage on schema audit_log to public;
+
+grant usage on all sequences in schema audit_log to public;
+
+grant select on all tables in schema audit_log to public;
+
+grant insert on audit_log.tb_audit_event, 
+                audit_log.tb_audit_event_current,
+                audit_log.tb_audit_transaction_type 
+        to public;
+
+grant update (audit_transaction_type) 
+    on audit_log.tb_audit_event_current to public;
+
+revoke select on audit_log.tb_audit_event from public;
+
+-- create role audit_log with password 'CyanAudit';
+grant select on audit_log.tb_audit_event to audit_log, postgres;
+
