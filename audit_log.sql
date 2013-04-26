@@ -444,6 +444,7 @@ CREATE OR REPLACE FUNCTION audit_log.fn_new_audit_event
 (
     in_audit_field      integer, -- FK into tb_audit_field
     in_row_pk_val       integer, -- value of primary key of this row
+    in_recorded         timestamp, -- clock timestamp of row op
     in_row_op           varchar, -- 'I', 'U', or 'D'
     in_old_value        anyelement, -- old value or null if INSERT
     in_new_value        anyelement  -- new value or null if DELETE
@@ -463,6 +464,7 @@ begin
     (
         audit_field,
         row_pk_val,
+        recorded,
         row_op,
         old_value,
         new_value
@@ -471,6 +473,7 @@ begin
     (
         in_audit_field,
         in_row_pk_val,
+        in_recorded,
         in_row_op::char(1),
         case when in_row_op = 'INSERT' then null else in_old_value end,
         case when in_row_op = 'DELETE' then null else in_new_value end
@@ -552,8 +555,12 @@ my $fn_q = "CREATE OR REPLACE FUNCTION "
          . "    my_row_pk_val       integer;\n"
          . "    my_old_row          record;\n"
          . "    my_new_row          record;\n"
+         . "    my_recorded         timestamp;\n"
          . "begin\n"
-         . "    perform audit_log.fn_set_last_audit_txid();\n\n"
+         . "    perform audit_log.fn_set_last_audit_txid();\n"
+         . "    \n"
+         . "    my_recorded := clock_timestamp();\n"
+         . "    \n"
          . "    if( TG_OP = 'INSERT' ) then\n"
          . "        my_row_pk_val := NEW.$pk_col;\n"
          . "    else\n"
@@ -585,6 +592,7 @@ foreach my $row (@{$colnames_rv->{'rows'}})
           .  "        perform audit_log.fn_new_audit_event(\n "
           .  "                    $audit_field,\n"
           .  "                    my_row_pk_val,\n"
+          .  "                    my_recorded,\n";
           .  "                    TG_OP,\n"
           .  "                    my_old_row.$column_name,\n"
           .  "                    my_new_row.$column_name\n"
@@ -795,7 +803,7 @@ CREATE TABLE IF NOT EXISTS audit_log.tb_audit_event
     audit_field             integer not null 
                             references audit_log.tb_audit_field,
     row_pk_val              integer not null,
-    recorded                timestamp not null default clock_timestamp(),
+    recorded                timestamp not null,
     uid                     integer not null,
     row_op                  char(1) not null CHECK (row_op in ('I','U','D')),
     txid                    bigint not null default txid_current(),
