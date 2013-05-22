@@ -1,20 +1,24 @@
--- Make sure the following lines appear at the bottom of postgresql.conf.
--- Customize the last three values to match your database configuration.
--- When you have added these lines, be sure to reload postgres.
+-- BEFORE RUNNING THIS SCRIPT:
+-- 1. Create the audit_log schema in your database
+-- 2. Make sure the following lines appear at the bottom of postgresql.conf.
+--    Customize the last three values to match your database configuration.
+--    When you have added these lines, be sure to reload postgres.
 --
--- custom_variable_classes = 'audit_log'
--- audit_log.uid = -1
--- audit_log.last_txid = 0
--- audit_log.user_table = 'tb_entity'
--- audit_log.user_table_uid_col = 'entity'
--- audit_log.user_table_email_col = 'email_address'
--- audit_log.user_table_username_col = 'username'
+--    custom_variable_classes = 'audit_log'
+--    audit_log.uid = -1
+--    audit_log.last_txid = 0
+--    audit_log.user_table = 'tb_entity'
+--    audit_log.user_table_uid_col = 'entity'
+--    audit_log.user_table_email_col = 'email_address'
+--    audit_log.user_table_username_col = 'username'
+--    audit_log.archive_tablespace = 'pg_default'
 
-create or replace language plperl;
-create or replace language plpgsql;
+-- create or replace language plperl;
+-- create or replace language plpgsql;
 
--- audit_log schema, to hold archived events
-create schema audit_log;
+-- Just a command to check that audit_log schema exsits.
+-- Application of the script should fail if this fails.
+alter schema audit_log owner to postgres;
 
 ------------------------
 ------ FUNCTIONS ------
@@ -739,6 +743,10 @@ begin
     execute 'alter table audit_log.' || my_table_name
          || '  add check(txid between '''
          ||     my_min_txid || ''' and ''' || my_max_txid || ''')';
+
+    -- move table to appropriate tablespace
+    execute 'alter table audit_log.' || my_table_name
+         || ' set tablespace ' || current_setting('audit_log.archive_tablespace');
 end
  $_$
     language 'plpgsql';
