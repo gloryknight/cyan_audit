@@ -18,67 +18,66 @@
 
 -- Just a command to check that audit_log schema exsits.
 -- Application of the script should fail if this fails.
-alter schema audit_log owner to postgres;
 
 ------------------------
 ------ FUNCTIONS ------
 ------------------------
 
-CREATE OR REPLACE FUNCTION audit_log.fn_set_audit_uid
+CREATE OR REPLACE FUNCTION fn_set_audit_uid
 (
     in_uid   integer
 )
 returns integer as
  $_$
 begin
-    return set_config('audit_log.uid', in_uid::varchar, false);
+    return set_config('@extschema@.uid', in_uid::varchar, false);
 end;
  $_$
     language plpgsql strict;
 
 
-CREATE OR REPLACE FUNCTION audit_log.fn_get_audit_uid() returns integer as
+CREATE OR REPLACE FUNCTION fn_get_audit_uid() returns integer as
  $_$
 declare
     my_uid    integer;
 begin
-    my_uid := current_setting('audit_log.uid');
+    my_uid := current_setting('@extschema@.uid');
 
     if my_uid >= 0 then return my_uid; end if;
 
-    select audit_log.fn_get_audit_uid_by_username(current_user::varchar)
+    select @extschema@.fn_get_audit_uid_by_username(current_user::varchar)
       into my_uid;
 
-    return audit_log.fn_set_audit_uid( coalesce( my_uid, 0 ) );
+    return @extschema@.fn_set_audit_uid( coalesce( my_uid, 0 ) );
 end
  $_$
     language plpgsql stable;
 
 
 
-CREATE OR REPLACE FUNCTION audit_log.fn_set_last_audit_txid
+CREATE OR REPLACE FUNCTION @extschema@.fn_set_last_audit_txid
 (
     in_txid   bigint default txid_current()
 )
 returns bigint as
  $_$
 begin
-    return set_config('audit_log.last_txid', in_txid::varchar, false);
+    return set_config('@extschema@.last_txid', in_txid::varchar, false);
 end
  $_$
     language plpgsql strict;
 
 
-CREATE OR REPLACE FUNCTION audit_log.fn_get_last_audit_txid()
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_last_audit_txid()
 returns bigint as
  $_$
 begin
-    return nullif(current_setting('audit_log.last_txid'), '0');
+    return nullif(current_setting('@extschema@.last_txid'), '0');
 end
  $_$
     language plpgsql stable;
 
-CREATE OR REPLACE FUNCTION audit_log.fn_get_email_by_audit_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_email_by_audit_uid
 (
     in_uid  integer
 )
@@ -88,9 +87,9 @@ declare
     my_email    varchar;
     my_query    varchar;
 begin
-    my_query := 'select ' || current_setting('audit_log.user_table_email_col')
-             || '  from ' || current_setting('audit_log.user_table')
-             || ' where ' || current_setting('audit_log.user_table_uid_col')
+    my_query := 'select ' || current_setting('@extschema@.user_table_email_col')
+             || '  from ' || current_setting('@extschema@.user_table')
+             || ' where ' || current_setting('@extschema@.user_table_uid_col')
                           || ' = ' || in_uid;
     execute my_query
        into my_email;
@@ -100,7 +99,7 @@ end
  $_$
     language plpgsql stable strict;
 
-CREATE OR REPLACE FUNCTION audit_log.fn_get_audit_uid_by_username
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid_by_username
 (
     in_username varchar
 )
@@ -110,9 +109,9 @@ declare
     my_uid      varchar;
     my_query    varchar;
 begin
-    my_query := 'select ' || current_setting('audit_log.user_table_uid_col')
-             || '  from ' || current_setting('audit_log.user_table')
-             || ' where ' || current_setting('audit_log.user_table_username_col')
+    my_query := 'select ' || current_setting('@extschema@.user_table_uid_col')
+             || '  from ' || current_setting('@extschema@.user_table')
+             || ' where ' || current_setting('@extschema@.user_table_username_col')
                           || ' = ''' || in_username || '''';
     execute my_query
        into my_uid;
@@ -123,7 +122,7 @@ end
     language plpgsql stable strict;
 
 
-CREATE OR REPLACE FUNCTION audit_log.fn_get_all_table_columns()
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_all_table_columns()
 returns table
 (
     table_name      varchar,
@@ -157,7 +156,7 @@ end
     language plpgsql stable;
 
 
-CREATE OR REPLACE FUNCTION audit_log.fn_get_column_data_type
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_column_data_type
 (
     in_table_name   varchar,
     in_column_name  varchar
@@ -183,7 +182,7 @@ end
     language 'plpgsql' stable strict;
 
 
-CREATE OR REPLACE FUNCTION audit_log.fn_get_table_pk_col
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_table_pk_col
 (
     in_table_name   varchar
 )
@@ -212,7 +211,7 @@ end
 
 
 
-CREATE OR REPLACE FUNCTION audit_log.fn_get_or_create_audit_transaction_type
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_transaction_type
 (
     in_label    varchar
 )
@@ -223,13 +222,13 @@ declare
 begin
     select audit_transaction_type
       into my_audit_transaction_type
-      from audit_log.tb_audit_transaction_type
+      from @extschema@.tb_audit_transaction_type
      where label = in_label;
 
     if not found then
         my_audit_transaction_type := nextval('sq_pk_audit_transaction_type');
 
-        insert into audit_log.tb_audit_transaction_type
+        insert into @extschema@.tb_audit_transaction_type
                     (
                         audit_transaction_type,
                         label
@@ -248,7 +247,7 @@ end
 
         
 -- fn_label_audit_transaction
-CREATE OR REPLACE FUNCTION audit_log.fn_label_audit_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_audit_transaction
 (
     in_label    varchar,
     in_txid     bigint default txid_current()
@@ -258,7 +257,7 @@ returns bigint as
 declare
     my_audit_transaction_type   integer;
 begin
-    select audit_log.fn_get_or_create_audit_transaction_type(in_label)
+    select @extschema@.fn_get_or_create_audit_transaction_type(in_label)
       into my_audit_transaction_type;
 
     update tb_audit_event_current
@@ -273,20 +272,20 @@ end
 
 
 -- fn_label_last_audit_transaction
-CREATE OR REPLACE FUNCTION audit_log.fn_label_last_audit_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_audit_transaction
 (
     in_label    varchar
 )
 returns bigint as
  $_$
 begin
-    return audit_log.fn_label_audit_transaction(in_label, fn_get_last_audit_txid());
+    return @extschema@.fn_label_audit_transaction(in_label, fn_get_last_audit_txid());
 end
  $_$
     language 'plpgsql' strict;
 
 -- fn_undo_transaction
-CREATE OR REPLACE FUNCTION audit_log.fn_undo_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_undo_transaction
 (
     in_txid   bigint
 )
@@ -319,9 +318,9 @@ begin
                        'DELETE FROM ' || af.table_name || ' where ' 
                        || afpk.column_name ||' = '||quote_literal(ae.row_pk_val)
                   end)::varchar as query
-             from audit_log.tb_audit_event ae
-             join audit_log.tb_audit_field af using(audit_field)
-             join audit_log.tb_audit_field afpk on af.table_pk = afpk.audit_field
+             from @extschema@.tb_audit_event ae
+             join @extschema@.tb_audit_field af using(audit_field)
+             join @extschema@.tb_audit_field afpk on af.table_pk = afpk.audit_field
             where ae.txid = in_txid
          group by af.table_name, ae.row_op, afpk.column_name, 
                   ae.row_pk_val
@@ -331,7 +330,7 @@ begin
         return next my_statement;
     end loop;
 
-    perform audit_log.fn_label_audit_transaction('Undo transaction');
+    perform @extschema@.fn_label_audit_transaction('Undo transaction');
 
     return;
 end
@@ -340,11 +339,11 @@ end
 
 
 -- fn_undo_last_transaction
-CREATE OR REPLACE FUNCTION audit_log.fn_undo_last_transaction()
+CREATE OR REPLACE FUNCTION @extschema@.fn_undo_last_transaction()
 returns setof varchar as
  $_$
 begin
-    return query select audit_log.fn_undo_transaction(fn_get_last_audit_txid());
+    return query select @extschema@.fn_undo_transaction(fn_get_last_audit_txid());
 end
  $_$
     language 'plpgsql';
@@ -352,7 +351,7 @@ end
 
 
 -- fn_get_or_create_audit_data_type
-CREATE OR REPLACE FUNCTION audit_log.fn_get_or_create_audit_data_type
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_data_type
 (
     in_type_name    varchar
 )
@@ -363,13 +362,13 @@ declare
 begin
     select audit_data_type
       into my_audit_data_type
-      from audit_log.tb_audit_data_type
+      from @extschema@.tb_audit_data_type
      where name = in_type_name;
 
     if not found then
         my_audit_data_type := nextval('sq_pk_audit_data_type');
 
-        insert into audit_log.tb_audit_data_type( audit_data_type, name ) 
+        insert into @extschema@.tb_audit_data_type( audit_data_type, name ) 
             values( my_audit_data_type, in_type_name );
     end if;
 
@@ -381,7 +380,7 @@ end
 
 
 -- fn_get_or_create_audit_field
-CREATE OR REPLACE FUNCTION audit_log.fn_get_or_create_audit_field
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_field
 (
     in_table_name   varchar,
     in_column_name  varchar
@@ -394,19 +393,19 @@ declare
 begin
     select audit_field
       into my_audit_field
-      from audit_log.tb_audit_field
+      from @extschema@.tb_audit_field
      where table_name = in_table_name
        and column_name = in_column_name;
 
     if not found then
         perform *
-           from audit_log.tb_audit_field
+           from @extschema@.tb_audit_field
           where table_name = in_table_name
           limit 1;
 
         if found then
             perform *
-               from audit_log.tb_audit_field
+               from @extschema@.tb_audit_field
               where table_name = in_table_name
                 and active = true
               limit 1;
@@ -420,7 +419,7 @@ begin
             my_active = true;
         end if;
           
-        insert into audit_log.tb_audit_field
+        insert into @extschema@.tb_audit_field
         (
             table_name,
             column_name,
@@ -444,7 +443,7 @@ end
 
 
 -- fn_new_audit_event
-CREATE OR REPLACE FUNCTION audit_log.fn_new_audit_event
+CREATE OR REPLACE FUNCTION @extschema@.fn_new_audit_event
 (
     in_audit_field      integer, -- FK into tb_audit_field
     in_row_pk_val       integer, -- value of primary key of this row
@@ -464,7 +463,7 @@ begin
         return;
     end if;
 
-    insert into audit_log.tb_audit_event
+    insert into @extschema@.tb_audit_event
     (
         audit_field,
         row_pk_val,
@@ -488,7 +487,7 @@ end
 
 
 -- fn_drop_audit_event_log_trigger
-CREATE OR REPLACE FUNCTION audit_log.fn_drop_audit_event_log_trigger 
+CREATE OR REPLACE FUNCTION @extschema@.fn_drop_audit_event_log_trigger 
 (
     in_table_name   varchar
 )
@@ -503,7 +502,7 @@ begin
 
     set client_min_messages to warning;
     execute 'drop function if exists '
-         || 'audit_log.'||my_function_name||'() cascade';
+         || '@extschema@.'||my_function_name||'() cascade';
     set client_min_messages to notice;
 end
  $_$
@@ -512,7 +511,7 @@ end
 
 
 -- fn_update_audit_event_log_trigger_on_table
-CREATE OR REPLACE FUNCTION audit_log.fn_update_audit_event_log_trigger_on_table
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_event_log_trigger_on_table
 (
     in_table_name   varchar
 )
@@ -525,7 +524,7 @@ my $table_name = $_[0];
 return if $table_name =~ 'tb_audit_.*';
 
 my $colnames_q = "select audit_field, column_name "
-               . "  from audit_log.tb_audit_field "
+               . "  from @extschema@.tb_audit_field "
                . " where table_name = '$table_name' "
                . "   and active = true ";
 
@@ -533,12 +532,12 @@ my $colnames_rv = spi_exec_query($colnames_q);
 
 if( $colnames_rv->{'processed'} == 0 )
 {
-    my $q = "select audit_log.fn_drop_audit_event_log_trigger('$table_name')";
+    my $q = "select @extschema@.fn_drop_audit_event_log_trigger('$table_name')";
     eval{ spi_exec_query($q) };
     return;
 }
 
-my $pk_q = "select audit_log.fn_get_table_pk_col('$table_name') as pk_col ";
+my $pk_q = "select @extschema@.fn_get_table_pk_col('$table_name') as pk_col ";
 
 my $pk_rv = spi_exec_query($pk_q);
 
@@ -551,7 +550,7 @@ unless( $pk_col )
 }
 
 my $fn_q = "CREATE OR REPLACE FUNCTION "
-         . "    audit_log.fn_log_audit_event_$table_name()\n"
+         . "    @extschema@.fn_log_audit_event_$table_name()\n"
          . "returns trigger as \n"
          . " \$_\$\n"
          . "-- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT\n"
@@ -561,7 +560,7 @@ my $fn_q = "CREATE OR REPLACE FUNCTION "
          . "    my_new_row          record;\n"
          . "    my_recorded         timestamp;\n"
          . "begin\n"
-         . "    perform audit_log.fn_set_last_audit_txid();\n"
+         . "    perform @extschema@.fn_set_last_audit_txid();\n"
          . "    \n"
          . "    my_recorded := clock_timestamp();\n"
          . "    \n"
@@ -593,10 +592,10 @@ foreach my $row (@{$colnames_rv->{'rows'}})
           .  "        my_old_row.${column_name}::text) OR\n"
           .  "       (TG_OP = 'DELETE')\n"
           .  "    THEN\n"
-          .  "        perform audit_log.fn_new_audit_event(\n "
+          .  "        perform @extschema@.fn_new_audit_event(\n "
           .  "                    $audit_field,\n"
           .  "                    my_row_pk_val,\n"
-          .  "                    my_recorded,\n";
+          .  "                    my_recorded,\n"
           .  "                    TG_OP,\n"
           .  "                    my_old_row.$column_name,\n"
           .  "                    my_new_row.$column_name\n"
@@ -616,28 +615,30 @@ $fn_q .= "    return NEW; \n"
       .  " \$_\$ \n"
       .  "    language 'plpgsql'; ";
 
-elog(NOTICE, $fn_q);
 eval { spi_exec_query($fn_q) };
 
 my $tg_q = "CREATE TRIGGER tr_log_audit_event_$table_name "
          . "   after insert or update or delete on $table_name for each row "
-         . "   execute procedure audit_log.fn_log_audit_event_$table_name()";
-elog(NOTICE, $tg_q);
+         . "   execute procedure @extschema@.fn_log_audit_event_$table_name()";
 eval { spi_exec_query($tg_q) };
+
+#my $ext_q = "ALTER EXTENSION auditlog ADD FUNCTION @extschema@.fn_log_audit_event_$table_name()";
+#
+#eval { spi_exec_query($ext_q) };
  $_$
     language 'plperl';
 
 
 
 -- fn_update_audit_fields
-CREATE OR REPLACE FUNCTION audit_log.fn_update_audit_fields() returns void as
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields() returns void as
  $_$
 begin
     with tt_audit_fields as
     (
         select coalesce(
                    af.audit_field,
-                   audit_log.fn_get_or_create_audit_field(
+                   @extschema@.fn_get_or_create_audit_field(
                        a.attrelid::regclass::varchar,
                        a.attname::varchar
                    )
@@ -653,11 +654,11 @@ begin
           join pg_namespace n
             on cn.connamespace = n.oid
            and n.nspname::varchar = 'public'
-     full join audit_log.tb_audit_field af
+     full join @extschema@.tb_audit_field af
             on a.attrelid::regclass::varchar = af.table_name
            and a.attname::varchar = af.column_name
     )
-    update audit_log.tb_audit_field af
+    update @extschema@.tb_audit_field af
        set active = false
       from tt_audit_fields afs
      where afs.stale
@@ -669,18 +670,18 @@ end
 
 --------- Audit event archiving -----------
 
-create or replace function audit_log.fn_redirect_audit_events() 
+create or replace function @extschema@.fn_redirect_audit_events() 
 returns trigger as
  $_$
 begin
-    insert into audit_log.tb_audit_event_current select NEW.*;
+    insert into @extschema@.tb_audit_event_current select NEW.*;
     return null;
 end
  $_$
     language 'plpgsql';
 
 -- fn_rotate_audit_events
-CREATE OR REPLACE FUNCTION audit_log.fn_rotate_audit_events() returns void as
+CREATE OR REPLACE FUNCTION @extschema@.fn_rotate_audit_events() returns void as
  $_$
 declare
     my_min_recorded timestamp;
@@ -690,7 +691,7 @@ declare
     my_table_name   varchar;
     my_query        varchar;
 begin
-    if (select count(1) from audit_log.tb_audit_event_current) = 0 then
+    if (select count(1) from @extschema@.tb_audit_event_current) = 0 then
         raise exception 'No events to rotate';
     end if;
 
@@ -698,55 +699,57 @@ begin
     my_table_name := 'tb_audit_event_' || to_char(now(), 'YYYYMMDD_HH24MI');
 
     -- drop constraint
-    alter table tb_audit_event_current 
+    alter table @extschema@.tb_audit_event_current 
         drop constraint if exists tb_audit_event_current_recorded_check;
 
     -- rename (archive) table
-    execute 'alter table audit_log.tb_audit_event_current rename to '
+    execute 'alter table @extschema@.tb_audit_event_current rename to '
          || my_table_name;
 
     -- create new current table
-    create table audit_log.tb_audit_event_current() 
-        inherits ( audit_log.tb_audit_event );
+    create table @extschema@.tb_audit_event_current() 
+        inherits ( @extschema@.tb_audit_event );
+
+--    alter extension auditlog drop table @extschema@.tb_audit_event_current;
 
     -- add check constraint to new current table
-    execute 'alter table audit_log.tb_audit_event_current '
+    execute 'alter table @extschema@.tb_audit_event_current '
          || 'add constraint tb_audit_event_current_recorded_check '
          || 'check(recorded >= '''||now()::timestamp::text ||''')';
 
     -- rename indexes on archived table
-    execute 'alter index audit_log.tb_audit_event_current_txid_idx rename to '
+    execute 'alter index @extschema@.tb_audit_event_current_txid_idx rename to '
             ||my_table_name||'_txid_idx';
-    execute 'alter index audit_log.tb_audit_event_current_recorded_idx rename to '
+    execute 'alter index @extschema@.tb_audit_event_current_recorded_idx rename to '
             ||my_table_name||'_recorded_idx';
-    execute 'alter index audit_log.tb_audit_event_current_audit_field_idx rename to '
+    execute 'alter index @extschema@.tb_audit_event_current_audit_field_idx rename to '
             ||my_table_name||'_audit_field_idx';
 
     -- create indexes on new table
     create index tb_audit_event_current_txid_idx
-        on audit_log.tb_audit_event_current(txid);
+        on @extschema@.tb_audit_event_current(txid);
     create index tb_audit_event_current_recorded_idx
-        on audit_log.tb_audit_event_current(recorded);
+        on @extschema@.tb_audit_event_current(recorded);
     create index tb_audit_event_current_audit_field_idx
-        on audit_log.tb_audit_event_current(audit_field);
+        on @extschema@.tb_audit_event_current(audit_field);
 
     -- get mins & maxes for creating check constraints
     execute 'select max(recorded), min(recorded), '
          || '       min(txid), max(txid) '
-         || '  from audit_log.'||my_table_name
+         || '  from @extschema@.'||my_table_name
        into my_max_recorded, my_min_recorded,
             my_min_txid, my_max_txid;
 
     -- add check constraints to archived table
-    execute 'alter table audit_log.' || my_table_name || ' add check(recorded between '''
+    execute 'alter table @extschema@.' || my_table_name || ' add check(recorded between '''
          || my_min_recorded || ''' and ''' || my_max_recorded || ''')';
-    execute 'alter table audit_log.' || my_table_name
+    execute 'alter table @extschema@.' || my_table_name
          || '  add check(txid between '''
          ||     my_min_txid || ''' and ''' || my_max_txid || ''')';
 
     -- move table to appropriate tablespace
-    execute 'alter table audit_log.' || my_table_name
-         || ' set tablespace ' || current_setting('audit_log.archive_tablespace');
+    execute 'alter table @extschema@.' || my_table_name
+         || ' set tablespace ' || current_setting('@extschema@.archive_tablespace');
 end
  $_$
     language 'plpgsql';
@@ -757,45 +760,45 @@ end
 ------------------
 
 -- tb_audit_data_type
-create sequence audit_log.sq_pk_audit_data_type;
+create sequence @extschema@.sq_pk_audit_data_type;
 
-CREATE TABLE IF NOT EXISTS audit_log.tb_audit_data_type
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_data_type
 (
     audit_data_type integer primary key
                     default nextval('sq_pk_audit_data_type'),
     name            varchar not null unique
 );
 
-alter sequence audit_log.sq_pk_audit_data_type
-    owned by audit_log.tb_audit_data_type.audit_data_type;
+alter sequence @extschema@.sq_pk_audit_data_type
+    owned by @extschema@.tb_audit_data_type.audit_data_type;
 
 
 
 
 -- tb_audit_field
-create sequence audit_log.sq_pk_audit_field;
+create sequence @extschema@.sq_pk_audit_field;
 
-CREATE TABLE IF NOT EXISTS audit_log.tb_audit_field
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
 (
     audit_field     integer primary key default nextval('sq_pk_audit_field'),
     table_name      varchar,
     column_name     varchar,
-    audit_data_type integer not null references audit_log.tb_audit_data_type,   
-    table_pk        integer not null references audit_log.tb_audit_field,
+    audit_data_type integer not null references @extschema@.tb_audit_data_type,   
+    table_pk        integer not null references @extschema@.tb_audit_field,
     active          boolean not null default true,
     CONSTRAINT tb_audit_field_table_column_key UNIQUE(table_name,column_name),
     CONSTRAINT tb_audit_field_tb_audit_event_not_allowed 
         CHECK( table_name not like 'tb_audit_event%' )
 );
 
-alter sequence audit_log.sq_pk_audit_field
-    owned by audit_log.tb_audit_field.audit_field;
+alter sequence @extschema@.sq_pk_audit_field
+    owned by @extschema@.tb_audit_field.audit_field;
 
 
 -- tb_audit_transaction_type
-CREATE SEQUENCE audit_log.sq_pk_audit_transaction_type;
+CREATE SEQUENCE @extschema@.sq_pk_audit_transaction_type;
 
-CREATE TABLE IF NOT EXISTS audit_log.tb_audit_transaction_type
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_transaction_type
 (
     audit_transaction_type  integer primary key
                             default nextval('sq_pk_audit_transaction_type'),
@@ -803,13 +806,13 @@ CREATE TABLE IF NOT EXISTS audit_log.tb_audit_transaction_type
 );
 
 ALTER SEQUENCE sq_pk_audit_transaction_type
-    owned by audit_log.tb_audit_transaction_type.audit_transaction_type;
+    owned by @extschema@.tb_audit_transaction_type.audit_transaction_type;
 
 -- tb_audit_event
-CREATE TABLE IF NOT EXISTS audit_log.tb_audit_event
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
 (
     audit_field             integer not null 
-                            references audit_log.tb_audit_field,
+                            references @extschema@.tb_audit_field,
     row_pk_val              integer not null,
     recorded                timestamp not null,
     uid                     integer not null,
@@ -817,33 +820,35 @@ CREATE TABLE IF NOT EXISTS audit_log.tb_audit_event
     txid                    bigint not null default txid_current(),
     pid                     integer not null default pg_backend_pid(),
     audit_transaction_type  integer 
-                            references audit_log.tb_audit_transaction_type,
+                            references @extschema@.tb_audit_transaction_type,
     old_value               text,
     new_value               text
 );
 
-ALTER TABLE audit_log.tb_audit_event 
-    alter column uid set default audit_log.fn_get_audit_uid();
+ALTER TABLE @extschema@.tb_audit_event 
+    alter column uid set default @extschema@.fn_get_audit_uid();
 
 -- tb_audit_event_current
-CREATE TABLE IF NOT EXISTS audit_log.tb_audit_event_current() 
-    inherits ( audit_log.tb_audit_event );
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event_current() 
+    inherits ( @extschema@.tb_audit_event );
 
-drop index if exists audit_log.tb_audit_event_current_txid_idx;
-drop index if exists audit_log.tb_audit_event_current_recorded_idx;
-drop index if exists audit_log.tb_audit_event_current_audit_field_idx;
+-- alter extension auditlog drop table @extschema@.tb_audit_event_current;
+
+drop index if exists @extschema@.tb_audit_event_current_txid_idx;
+drop index if exists @extschema@.tb_audit_event_current_recorded_idx;
+drop index if exists @extschema@.tb_audit_event_current_audit_field_idx;
 
 create index tb_audit_event_current_txid_idx
-    on audit_log.tb_audit_event_current(txid);
+    on @extschema@.tb_audit_event_current(txid);
 create index tb_audit_event_current_recorded_idx
-    on audit_log.tb_audit_event_current(recorded);
+    on @extschema@.tb_audit_event_current(recorded);
 create index tb_audit_event_current_audit_field_idx
-    on audit_log.tb_audit_event_current(audit_field);
+    on @extschema@.tb_audit_event_current(audit_field);
 
-drop trigger if exists tr_redirect_audit_events on audit_log.tb_audit_event;
+drop trigger if exists tr_redirect_audit_events on @extschema@.tb_audit_event;
 create trigger tr_redirect_audit_events 
-    before insert on audit_log.tb_audit_event
-    for each row execute procedure audit_log.fn_redirect_audit_events();
+    before insert on @extschema@.tb_audit_event
+    for each row execute procedure @extschema@.fn_redirect_audit_events();
 
 
 
@@ -851,11 +856,11 @@ create trigger tr_redirect_audit_events
 ------ VIEWS -------
 --------------------
 
--- vw_audit_log
-CREATE OR REPLACE VIEW audit_log.vw_audit_log as
+-- log view
+CREATE OR REPLACE VIEW @extschema@.vw_audit_log as
    select ae.recorded, 
           ae.uid, 
-          audit_log.fn_get_email_by_audit_uid(ae.uid) as user_email,
+          @extschema@.fn_get_email_by_audit_uid(ae.uid) as user_email,
           ae.txid, 
           att.label as description,
           af.table_name,
@@ -864,17 +869,17 @@ CREATE OR REPLACE VIEW audit_log.vw_audit_log as
           ae.row_op as op,
           ae.old_value,
           ae.new_value
-     from audit_log.tb_audit_event ae
-     join audit_log.tb_audit_field af using(audit_field)
-left join audit_log.tb_audit_transaction_type att using(audit_transaction_type)
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
+left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
  order by ae.recorded desc, af.table_name, af.column_name;
 
 
 -- vw_audit_transaction_statement
-CREATE OR REPLACE VIEW audit_log.vw_audit_transaction_statement as
+CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
    select ae.txid, 
           ae.recorded,
-          audit_log.fn_get_email_by_audit_uid(ae.uid) as user_email,
+          @extschema@.fn_get_email_by_audit_uid(ae.uid) as user_email,
           att.label as description, 
           (case 
           when ae.row_op = 'I' then
@@ -894,16 +899,16 @@ CREATE OR REPLACE VIEW audit_log.vw_audit_transaction_statement as
                'DELETE FROM ' || af.table_name || ' where ' || afpk.column_name
                ||' = '||quote_literal(ae.row_pk_val)||'::'||adtpk.name||';'
           end)::varchar as query
-     from audit_log.tb_audit_event ae
-     join audit_log.tb_audit_field af using(audit_field)
-     join audit_log.tb_audit_data_type adt using(audit_data_type)
-     join audit_log.tb_audit_field afpk on af.table_pk = afpk.audit_field
-     join audit_log.tb_audit_data_type adtpk 
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
+     join @extschema@.tb_audit_data_type adt using(audit_data_type)
+     join @extschema@.tb_audit_field afpk on af.table_pk = afpk.audit_field
+     join @extschema@.tb_audit_data_type adtpk 
        on afpk.audit_data_type = adtpk.audit_data_type
-left join audit_log.tb_audit_transaction_type att using(audit_transaction_type)
+left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
  group by af.table_name, ae.row_op, afpk.column_name,
           ae.row_pk_val, adtpk.name, ae.txid, ae.recorded,
-          att.label, audit_log.fn_get_email_by_audit_uid(ae.uid)
+          att.label, @extschema@.fn_get_email_by_audit_uid(ae.uid)
  order by ae.recorded;
 
 
@@ -912,7 +917,7 @@ left join audit_log.tb_audit_transaction_type att using(audit_transaction_type)
 -----------------------
 
 -- fn_audit_event_log_trigger_updater
-CREATE OR REPLACE FUNCTION audit_log.fn_audit_event_log_trigger_updater()
+CREATE OR REPLACE FUNCTION @extschema@.fn_audit_event_log_trigger_updater()
 returns trigger as
  $_$
 declare
@@ -924,7 +929,7 @@ begin
         my_table_name := NEW.table_name;
     end if;
 
-    perform audit_log.fn_update_audit_event_log_trigger_on_table(my_table_name);
+    perform @extschema@.fn_update_audit_event_log_trigger_on_table(my_table_name);
     return new;
 end
  $_$
@@ -932,15 +937,15 @@ end
 
 
 drop trigger if exists tr_audit_event_log_trigger_updater
-    on audit_log.tb_audit_field;
+    on @extschema@.tb_audit_field;
 
 CREATE TRIGGER tr_audit_event_log_trigger_updater
-    AFTER INSERT OR UPDATE OR DELETE on audit_log.tb_audit_field
-    FOR EACH ROW EXECUTE PROCEDURE audit_log.fn_audit_event_log_trigger_updater();
+    AFTER INSERT OR UPDATE OR DELETE on @extschema@.tb_audit_field
+    FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_audit_event_log_trigger_updater();
 
 
 -- fn_check_audit_field_validity
-CREATE OR REPLACE FUNCTION audit_log.fn_check_audit_field_validity() 
+CREATE OR REPLACE FUNCTION @extschema@.fn_check_audit_field_validity() 
 returns trigger as
  $_$
 declare
@@ -965,12 +970,12 @@ begin
     if my_pk_col = NEW.column_name then
         NEW.table_pk := NEW.audit_field;
     else
-        select audit_log.fn_get_or_create_audit_field(NEW.table_name, my_pk_col)
+        select @extschema@.fn_get_or_create_audit_field(NEW.table_name, my_pk_col)
           into NEW.table_pk;
     end if;
 
-    my_audit_data_type := audit_log.fn_get_or_create_audit_data_type(
-        audit_log.fn_get_column_data_type(NEW.table_name, NEW.column_name)
+    my_audit_data_type := @extschema@.fn_get_or_create_audit_data_type(
+        @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
     );
 
     if my_audit_data_type is not null then
@@ -988,13 +993,13 @@ end
     language plpgsql;
 
 drop trigger if exists tr_check_audit_field_validity
-    on audit_log.tb_audit_field;
+    on @extschema@.tb_audit_field;
 
 CREATE TRIGGER tr_check_audit_field_validity
-    BEFORE INSERT OR UPDATE ON audit_log.tb_audit_field
-    FOR EACH ROW EXECUTE PROCEDURE audit_log.fn_check_audit_field_validity();
+    BEFORE INSERT OR UPDATE ON @extschema@.tb_audit_field
+    FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_check_audit_field_validity();
 
-select audit_log.fn_update_audit_fields();
+-- select @extschema@.fn_update_audit_fields();
 
 
 --- COMPATIBILITY
@@ -1009,35 +1014,53 @@ create or replace function fn_set_procpid_entity
 )
 returns integer as
  $_$
-    select audit_log.fn_set_audit_uid($1);
+    select @extschema@.fn_set_audit_uid($1);
  $_$
 language sql;
 
 create or replace function fn_get_procpid_entity() returns integer as
  $_$
-    select audit_log.fn_get_audit_uid();
+    select @extschema@.fn_get_audit_uid();
  $_$
 language sql;
 
 
 --- PERMISSIONS
 
-grant usage on schema audit_log to public;
+grant usage on schema @extschema@ to public;
 
-grant usage on all sequences in schema audit_log to public;
+grant usage on all sequences in schema @extschema@ to public;
 
-grant select on all tables in schema audit_log to public;
+grant select on all tables in schema @extschema@ to public;
 
-grant insert on audit_log.tb_audit_event, 
-                audit_log.tb_audit_event_current,
-                audit_log.tb_audit_transaction_type 
+grant insert on @extschema@.tb_audit_event, 
+                @extschema@.tb_audit_event_current,
+                @extschema@.tb_audit_transaction_type 
         to public;
 
 grant update (audit_transaction_type) 
-    on audit_log.tb_audit_event_current to public;
+    on @extschema@.tb_audit_event_current to public;
 
-revoke select on audit_log.tb_audit_event from public;
+revoke select on @extschema@.tb_audit_event from public;
 
--- create role audit_log with password 'CyanAudit';
-grant select on audit_log.tb_audit_event to audit_log, postgres;
+-- create role @extschema@ with password 'CyanAudit';
+grant select on @extschema@.tb_audit_event to postgres;
+
+-- set current and default search paths
+-- do language plpgsql 
+--  $$ 
+-- declare
+--     my_schemas  text[];
+--     my_set_cmd  text;
+-- begin 
+--     my_schemas := current_schemas(false);
+--     my_schemas := ' set search_path to ' || array_to_string(my_schemas, ', ');
+-- 
+--     raise notice '%', my_set_cmd;
+-- 
+--     execute my_set_cmd;
+--     execute 'alter database ' || current_database() || my_set_cmd;
+-- end; 
+--  $$;
+
 
