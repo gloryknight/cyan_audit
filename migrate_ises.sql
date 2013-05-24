@@ -1,7 +1,7 @@
 create table tt_active_audit_fields as
 select * from tb_audit_field where active;
 
-update tb_audit_field set active = false;
+update public.tb_audit_field set active = false;
 
 -- should exist:
 drop function if exists public.fn_archive_audit_events(in_age interval);
@@ -27,6 +27,8 @@ drop function if exists
 public.fn_update_audit_event_log_trigger_on_table(in_table_name character
 varying);
 drop function if exists public.fn_update_audit_fields();
+drop function if exists public.fn_set_procpid_entity(int);
+drop function if exists public.fn_get_procpid_entity();
 
 -- may not actually exist:
 drop function if exists public.fn_get_audit_uid();

@@ -1,27 +1,38 @@
--- BEFORE RUNNING THIS SCRIPT:
--- 1. Create the audit_log schema in your database
--- 2. Make sure the following lines appear at the bottom of postgresql.conf.
---    Customize the last three values to match your database configuration.
---    When you have added these lines, be sure to reload postgres.
---
---    custom_variable_classes = 'audit_log'
---    audit_log.uid = -1
---    audit_log.last_txid = 0
---    audit_log.user_table = 'tb_entity'
---    audit_log.user_table_uid_col = 'entity'
---    audit_log.user_table_email_col = 'email_address'
---    audit_log.user_table_username_col = 'username'
---    audit_log.archive_tablespace = 'pg_default'
+/*
+BEFORE RUNNING THIS SCRIPT:
+1. Create the audit_log schema in your database
+2. Make sure the following lines appear at the bottom of postgresql.conf.
+   Customize the last three values to match your database configuration.
+   When you have added these lines, be sure to reload postgres.
 
--- create or replace language plperl;
--- create or replace language plpgsql;
-
--- Just a command to check that audit_log schema exsits.
--- Application of the script should fail if this fails.
+   custom_variable_classes = 'audit_log'
+   audit_log.uid = -1
+   audit_log.last_txid = 0
+   audit_log.user_table = 'tb_entity'
+   audit_log.user_table_uid_col = 'entity'
+   audit_log.user_table_email_col = 'email_address'
+   audit_log.user_table_username_col = 'username'
+   audit_log.archive_tablespace = 'pg_default'
+   audit_log.enabled = 1
+*/
 
 ------------------------
 ------ FUNCTIONS ------
 ------------------------
+
+do language plpgsql
+ $$
+begin
+--    if (select count(*) from pg_language where lanname = 'plperl') = 0 then
+--        create language plperl;
+--        alter extension auditlog drop language plperl;
+--    end if;
+
+    if '@extschema@' = 'public' then
+        raise exception 'Must install to schema other than public, e.g. auditlog';
+    end if;
+end;
+ $$;
 
 CREATE OR REPLACE FUNCTION fn_set_audit_uid
 (
@@ -554,12 +565,15 @@ my $fn_q = "CREATE OR REPLACE FUNCTION "
          . "returns trigger as \n"
          . " \$_\$\n"
          . "-- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT\n"
-         . "declare\n"
+         . "DECLARE\n"
          . "    my_row_pk_val       integer;\n"
          . "    my_old_row          record;\n"
          . "    my_new_row          record;\n"
-         . "    my_recorded         timestamp;\n"
-         . "begin\n"
+         . "BEGIN\n"
+         . "    if current_setting('audit_log.last_txid') = 0 then\n"
+         . "        return my_new_row;\n"
+         . "    end if;\n"
+         . "    \n"
          . "    perform @extschema@.fn_set_last_audit_txid();\n"
          . "    \n"
          . "    my_recorded := clock_timestamp();\n"
@@ -568,7 +582,8 @@ my $fn_q = "CREATE OR REPLACE FUNCTION "
          . "        my_row_pk_val := NEW.$pk_col;\n"
          . "    else\n"
          . "        my_row_pk_val := OLD.$pk_col;\n"
-         . "    end if;\n\n"
+         . "    end if;\n"
+         . "    \n"
          . "    if( TG_OP = 'DELETE' ) then\n"
          . "        my_new_row := OLD;\n"
          . "    else\n"
@@ -622,9 +637,9 @@ my $tg_q = "CREATE TRIGGER tr_log_audit_event_$table_name "
          . "   execute procedure @extschema@.fn_log_audit_event_$table_name()";
 eval { spi_exec_query($tg_q) };
 
-#my $ext_q = "ALTER EXTENSION auditlog ADD FUNCTION @extschema@.fn_log_audit_event_$table_name()";
-#
-#eval { spi_exec_query($ext_q) };
+my $ext_q = "ALTER EXTENSION auditlog ADD FUNCTION @extschema@.fn_log_audit_event_$table_name()";
+
+eval { spi_exec_query($ext_q) };
  $_$
     language 'plperl';
 
@@ -1045,22 +1060,4 @@ revoke select on @extschema@.tb_audit_event from public;
 
 -- create role @extschema@ with password 'CyanAudit';
 grant select on @extschema@.tb_audit_event to postgres;
-
--- set current and default search paths
--- do language plpgsql 
---  $$ 
--- declare
---     my_schemas  text[];
---     my_set_cmd  text;
--- begin 
---     my_schemas := current_schemas(false);
---     my_schemas := ' set search_path to ' || array_to_string(my_schemas, ', ');
--- 
---     raise notice '%', my_set_cmd;
--- 
---     execute my_set_cmd;
---     execute 'alter database ' || current_database() || my_set_cmd;
--- end; 
---  $$;
-
 
