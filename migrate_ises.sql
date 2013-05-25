@@ -1,7 +1,26 @@
+create schema auditlog;
+
+create extension auditlog schema auditlog;
+
+select auditlog.fn_update_audit_fields();
+
 create table tt_active_audit_fields as
-select * from tb_audit_field where active;
+select *
+  from tb_audit_field
+ where active;
 
 update public.tb_audit_field set active = false;
+
+select setval('auditlog.sq_pk_audit_event', max(op_sequence))
+  from public.tb_audit_event;
+
+update auditlog.tb_audit_field afnew
+   set active = afold.active
+  from public.tb_audit_field afold
+ where afnew.table_name = afold.table_name
+   and afnew.column_name = afold.column_name;
+
+select public.fn_rotate_audit_events();
 
 -- should exist:
 drop function if exists public.fn_archive_audit_events(in_age interval);
@@ -28,7 +47,6 @@ public.fn_update_audit_event_log_trigger_on_table(in_table_name character
 varying);
 drop function if exists public.fn_update_audit_fields();
 drop function if exists public.fn_set_procpid_entity(int);
-drop function if exists public.fn_get_procpid_entity();
 
 -- may not actually exist:
 drop function if exists public.fn_get_audit_uid();
@@ -44,10 +62,11 @@ alter table tb_audit_data_type
 
 --alter table tb_audit_event
 --    set schema audit_log;
-alter table tb_audit_event rename column entity to uid;
-alter table tb_audit_event rename column transaction_id to txid;
-alter table tb_audit_event rename column process_id to pid;
-alter table tb_audit_event 
+alter table public.tb_audit_event rename column entity to uid;
+alter table public.tb_audit_event rename column transaction_id to txid;
+alter table public.tb_audit_event rename column process_id to pid;
+alter table public.tb_audit_event rename column op_sequence to audit_event;
+alter table public.tb_audit_event 
     alter column op_sequence set default nextval('sq_op_sequence'),
     alter column txid set default txid_current(),
     alter column pid set default pg_backend_pid();
@@ -81,16 +100,42 @@ drop index if exists tb_audit_event_current_audit_field_idx;
 drop sequence if exists sq_pk_audit_event;
 drop sequence if exists sq_pk_audit_transaction;
 
--- alter sequence sq_op_sequence set schema audit_log;
 
--- alter sequence sq_pk_audit_data_type set schema audit_log;
--- alter sequence sq_pk_audit_field set schema audit_log;
--- alter sequence sq_pk_audit_transaction_type set schema audit_log;
+-----------------------------------------
+-- DEFAULT VALUES USING PROCPID_ENTITY --
+-----------------------------------------
 
+alter table tb_program alter column creator set default fn_get_audit_uid();
+alter table tb_program alter column modifier set default fn_get_audit_uid();
+alter table tb_project alter column creator set default fn_get_audit_uid();
+alter table tb_project alter column modifier set default fn_get_audit_uid();
+alter table tb_reset alter column creator set default fn_get_audit_uid();
+alter table tb_reset alter column modifier set default fn_get_audit_uid();
+alter table tb_task alter column creator set default fn_get_audit_uid();
+alter table tb_task alter column modifier set default fn_get_audit_uid();
+alter table tb_reset_task alter column creator set default fn_get_audit_uid();
+alter table tb_reset_task alter column modifier set default fn_get_audit_uid();
 
--- alter sequence sq_pk_audit_data_type 
---     owned by audit_log.tb_audit_data_type.audit_data_type;
--- alter sequence sq_pk_audit_field
---     owned by audit_log.tb_audit_field.audit_field;
--- alter sequence sq_pk_audit_transaction_type
---     owned by audit_log.tb_audit_transaction_type.audit_transaction_type;
+drop function fn_get_procpid_entity();
+
+create or replace function fn_set_procpid_entity(int) returns void as
+ $_$
+    select fn_set_audit_uid($1);
+ $_$
+    language sql;
+
+/*
+TODO:
+1. Populate new tb_audit_field with all values from old one
+2. Populate new auditlog.tb_audit_transaction_type from old one
+3. Foreach audit_log.tb_audit_event_*:
+   -  Move to auditlog schema
+   -  Alter to uninherit public.tb_audit_event
+   -  Alter to inherit auditlog.tb_audit_event
+   -  Remove all Fk consraints
+   -  Add fk constraint of audit_field to new auditlog.tb_audit_field
+   -  Populate audit_trasnaction_type based on old tb_audit_transaction
+   -  Add fk constraint of audit_transaction_type to new table
+4. Drop tables public.tb_audit_*
+*/
+

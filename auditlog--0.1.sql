@@ -23,10 +23,10 @@ BEFORE RUNNING THIS SCRIPT:
 do language plpgsql
  $$
 begin
---    if (select count(*) from pg_language where lanname = 'plperl') = 0 then
---        create language plperl;
---        alter extension auditlog drop language plperl;
---    end if;
+    if (select count(*) from pg_language where lanname = 'plperl') = 0 then
+        create language plperl;
+        alter extension auditlog drop language plperl;
+    end if;
 
     if '@extschema@' = 'public' then
         raise exception 'Must install to schema other than public, e.g. auditlog';
@@ -237,7 +237,7 @@ begin
      where label = in_label;
 
     if not found then
-        my_audit_transaction_type := nextval('sq_pk_audit_transaction_type');
+        my_audit_transaction_type := nextval('@extschema@.sq_pk_audit_transaction_type');
 
         insert into @extschema@.tb_audit_transaction_type
                     (
@@ -377,7 +377,7 @@ begin
      where name = in_type_name;
 
     if not found then
-        my_audit_data_type := nextval('sq_pk_audit_data_type');
+        my_audit_data_type := nextval('@extschema@.sq_pk_audit_data_type');
 
         insert into @extschema@.tb_audit_data_type( audit_data_type, name ) 
             values( my_audit_data_type, in_type_name );
@@ -780,7 +780,7 @@ create sequence @extschema@.sq_pk_audit_data_type;
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_data_type
 (
     audit_data_type integer primary key
-                    default nextval('sq_pk_audit_data_type'),
+                    default nextval('@extschema@.sq_pk_audit_data_type'),
     name            varchar not null unique
 );
 
@@ -795,7 +795,7 @@ create sequence @extschema@.sq_pk_audit_field;
 
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
 (
-    audit_field     integer primary key default nextval('sq_pk_audit_field'),
+    audit_field     integer primary key default nextval('@extschema@.sq_pk_audit_field'),
     table_name      varchar,
     column_name     varchar,
     audit_data_type integer not null references @extschema@.tb_audit_data_type,   
@@ -816,16 +816,20 @@ CREATE SEQUENCE @extschema@.sq_pk_audit_transaction_type;
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_transaction_type
 (
     audit_transaction_type  integer primary key
-                            default nextval('sq_pk_audit_transaction_type'),
+                            default nextval('@extschema@.sq_pk_audit_transaction_type'),
     label                   varchar unique
 );
 
 ALTER SEQUENCE sq_pk_audit_transaction_type
     owned by @extschema@.tb_audit_transaction_type.audit_transaction_type;
 
+CREATE SEQUENCE @extschema@.sq_pk_audit_event;
+
 -- tb_audit_event
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
 (
+    audit_event             bigint primary key 
+                            default nextval('@extschema@.sq_pk_audit_event'),
     audit_field             integer not null 
                             references @extschema@.tb_audit_field,
     row_pk_val              integer not null,
