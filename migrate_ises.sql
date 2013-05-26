@@ -1,5 +1,15 @@
 BEGIN;
 
+-- This is for on dev where this doesn't exist
+do language plpgsql
+ $_$
+begin
+    if (select count(*) from pg_namespace where nspname = 'audit_log') = 0 then
+        create schema audit_log;
+    end if;
+end;
+ $_$;
+
 -- Create schema and extension for new audit log
 create schema auditlog;
 create extension auditlog schema auditlog;
