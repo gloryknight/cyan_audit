@@ -545,6 +545,7 @@ if( $colnames_rv->{'processed'} == 0 )
 {
     my $q = "select @extschema@.fn_drop_audit_event_log_trigger('$table_name')";
     eval{ spi_exec_query($q) };
+    elog(ERROR, $@) if $@;
     return;
 }
 
@@ -569,6 +570,7 @@ my $fn_q = "CREATE OR REPLACE FUNCTION "
          . "    my_row_pk_val       integer;\n"
          . "    my_old_row          record;\n"
          . "    my_new_row          record;\n"
+         . "    my_recorded         timestamp;\n"
          . "BEGIN\n"
          . "    if current_setting('audit_log.last_txid') = 0 then\n"
          . "        return my_new_row;\n"
@@ -631,6 +633,7 @@ $fn_q .= "    return NEW; \n"
       .  "    language 'plpgsql'; ";
 
 eval { spi_exec_query($fn_q) };
+elog(ERROR, $@) if $@;
 
 my $tg_q = "CREATE TRIGGER tr_log_audit_event_$table_name "
          . "   after insert or update or delete on $table_name for each row "
@@ -640,6 +643,7 @@ eval { spi_exec_query($tg_q) };
 my $ext_q = "ALTER EXTENSION auditlog ADD FUNCTION @extschema@.fn_log_audit_event_$table_name()";
 
 eval { spi_exec_query($ext_q) };
+elog(ERROR, $@) if $@;
  $_$
     language 'plperl';
 
@@ -845,7 +849,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
 );
 
 ALTER SEQUENCE @extschema@.sq_pk_audit_event
-    owned by @extschema.tb_audit_event.audit_event;
+    owned by @extschema@.tb_audit_event.audit_event;
 
 -- tb_audit_event_current
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event_current() 
