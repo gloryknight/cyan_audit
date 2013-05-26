@@ -1,3 +1,6 @@
+\set ON_ERROR_STOP
+\set ECHO all
+
 BEGIN;
 
 -- This is for on dev where this doesn't exist
@@ -35,7 +38,7 @@ alter table public.tb_audit_event rename column entity to uid;
 alter table public.tb_audit_event rename column transaction_id to txid;
 alter table public.tb_audit_event rename column process_id to pid;
 alter table public.tb_audit_event rename column op_sequence to audit_event;
-alter table public.tb_audit_event alter column audit_event type bigint;
+--alter table public.tb_audit_event alter column audit_event type bigint;
 alter table public.tb_audit_event 
     add column audit_transaction_type integer;
 
@@ -92,7 +95,7 @@ alter table tb_task       alter column modifier set default fn_get_audit_uid();
 alter table tb_reset_task alter column creator  set default fn_get_audit_uid();
 alter table tb_reset_task alter column modifier set default fn_get_audit_uid();
 
-create or replace function fn_set_procpid_entity
+create or replace function public.fn_set_procpid_entity
 (
     in_entity integer
 ) returns integer as
@@ -156,6 +159,10 @@ drop function public.fn_update_audit_fields();
 drop function public.fn_set_procpid_entity(int);
 drop function public.fn_get_procpid_entity();
 drop function public.fn_expire_procpid_entities();
+drop function public.fn_get_my_last_transaction_id();
+drop function public.fn_set_my_last_transaction_id(bigint);
+drop function public.fn_undo_my_last_transaction();
+drop function public.fn_undo_transaction(bigint);
 
 
 -- Drop tables
@@ -254,6 +261,7 @@ update auditlog.tb_audit_event ae
 
 drop table audit_log.tb_audit_transaction_archive;
 drop table public.tb_audit_transaction;
+drop table public.tb_audit_transaction_type;
 drop sequence if exists sq_pk_audit_transaction;
 
 -- Drop schema

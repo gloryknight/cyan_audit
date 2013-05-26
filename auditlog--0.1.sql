@@ -334,7 +334,7 @@ begin
              join @extschema@.tb_audit_field afpk on af.table_pk = afpk.audit_field
             where ae.txid = in_txid
          group by af.table_name, ae.row_op, afpk.column_name, 
-                  ae.row_pk_val
+                  ae.row_pk_val, ae.recorded
          order by ae.recorded desc
     loop
         execute my_statement;
@@ -572,7 +572,7 @@ my $fn_q = "CREATE OR REPLACE FUNCTION "
          . "    my_new_row          record;\n"
          . "    my_recorded         timestamp;\n"
          . "BEGIN\n"
-         . "    if current_setting('audit_log.last_txid') = 0 then\n"
+         . "    if current_setting('@extschema@.enabled') = '0' then\n"
          . "        return my_new_row;\n"
          . "    end if;\n"
          . "    \n"
@@ -643,7 +643,6 @@ eval { spi_exec_query($tg_q) };
 my $ext_q = "ALTER EXTENSION auditlog ADD FUNCTION @extschema@.fn_log_audit_event_$table_name()";
 
 eval { spi_exec_query($ext_q) };
-elog(ERROR, $@) if $@;
  $_$
     language 'plperl';
 
@@ -728,8 +727,6 @@ begin
     -- create new current table
     create table @extschema@.tb_audit_event_current() 
         inherits ( @extschema@.tb_audit_event );
-
---    alter extension auditlog drop table @extschema@.tb_audit_event_current;
 
     -- add check constraint to new current table
     execute 'alter table @extschema@.tb_audit_event_current '
@@ -980,6 +977,9 @@ begin
            NEW.column_name != OLD.column_name
         then
             raise exception 'Updating table_name or column_name not allowed.';
+        elsif NEW.active = false
+        then
+            return NEW;
         end if;
     end if;
 
@@ -1022,31 +1022,6 @@ CREATE TRIGGER tr_check_audit_field_validity
     BEFORE INSERT OR UPDATE ON @extschema@.tb_audit_field
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_check_audit_field_validity();
 
--- select @extschema@.fn_update_audit_fields();
-
-
---- COMPATIBILITY
-create or replace function fn_expire_procpid_entities() returns void as
- $_$
- $_$
-language sql;
-
-create or replace function fn_set_procpid_entity
-(
-    in_entity   integer
-)
-returns integer as
- $_$
-    select @extschema@.fn_set_audit_uid($1);
- $_$
-language sql;
-
-create or replace function fn_get_procpid_entity() returns integer as
- $_$
-    select @extschema@.fn_get_audit_uid();
- $_$
-language sql;
-
 
 --- PERMISSIONS
 
@@ -1066,6 +1041,5 @@ grant update (audit_transaction_type)
 
 revoke select on @extschema@.tb_audit_event from public;
 
--- create role @extschema@ with password 'CyanAudit';
 grant select on @extschema@.tb_audit_event to postgres;
 
