@@ -834,7 +834,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
                             references @extschema@.tb_audit_field,
     row_pk_val              integer not null,
     recorded                timestamp not null,
-    uid                     integer not null,
+    uid                     integer not null default @extschema@.fn_get_audit_uid(),
     row_op                  char(1) not null CHECK (row_op in ('I','U','D')),
     txid                    bigint not null default txid_current(),
     pid                     integer not null default pg_backend_pid(),
@@ -844,8 +844,8 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
     new_value               text
 );
 
-ALTER TABLE @extschema@.tb_audit_event 
-    alter column uid set default @extschema@.fn_get_audit_uid();
+ALTER SEQUENCE @extschema@.sq_pk_audit_event
+    owned by @extschema.tb_audit_event.audit_event;
 
 -- tb_audit_event_current
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event_current() 
