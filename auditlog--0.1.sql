@@ -829,7 +829,7 @@ CREATE SEQUENCE @extschema@.sq_pk_audit_event;
 -- tb_audit_event
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
 (
-    audit_event             bigint primary key 
+    audit_event             integer primary key 
                             default nextval('@extschema@.sq_pk_audit_event'),
     audit_field             integer not null 
                             references @extschema@.tb_audit_field,

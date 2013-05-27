@@ -38,7 +38,6 @@ alter table public.tb_audit_event rename column entity to uid;
 alter table public.tb_audit_event rename column transaction_id to txid;
 alter table public.tb_audit_event rename column process_id to pid;
 alter table public.tb_audit_event rename column op_sequence to audit_event;
---alter table public.tb_audit_event alter column audit_event type bigint;
 alter table public.tb_audit_event 
     add column audit_transaction_type integer;
 
