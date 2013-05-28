@@ -83,16 +83,16 @@ update auditlog.tb_audit_field af
 
 
 -- These columns were using fn_get_procpid_entity()
-alter table tb_program    alter column creator  set default fn_get_audit_uid();
-alter table tb_program    alter column modifier set default fn_get_audit_uid();
-alter table tb_project    alter column creator  set default fn_get_audit_uid();
-alter table tb_project    alter column modifier set default fn_get_audit_uid();
-alter table tb_reset      alter column creator  set default fn_get_audit_uid();
-alter table tb_reset      alter column modifier set default fn_get_audit_uid();
-alter table tb_task       alter column creator  set default fn_get_audit_uid();
-alter table tb_task       alter column modifier set default fn_get_audit_uid();
-alter table tb_reset_task alter column creator  set default fn_get_audit_uid();
-alter table tb_reset_task alter column modifier set default fn_get_audit_uid();
+alter table tb_program    alter column creator  set default auditlog.fn_get_audit_uid();
+alter table tb_program    alter column modifier set default auditlog.fn_get_audit_uid();
+alter table tb_project    alter column creator  set default auditlog.fn_get_audit_uid();
+alter table tb_project    alter column modifier set default auditlog.fn_get_audit_uid();
+alter table tb_reset      alter column creator  set default auditlog.fn_get_audit_uid();
+alter table tb_reset      alter column modifier set default auditlog.fn_get_audit_uid();
+alter table tb_task       alter column creator  set default auditlog.fn_get_audit_uid();
+alter table tb_task       alter column modifier set default auditlog.fn_get_audit_uid();
+alter table tb_reset_task alter column creator  set default auditlog.fn_get_audit_uid();
+alter table tb_reset_task alter column modifier set default auditlog.fn_get_audit_uid();
 
 create or replace function public.fn_set_procpid_entity
 (
@@ -126,7 +126,7 @@ begin
         execute 'alter table auditlog.' || my_table
              || ' inherit auditlog.tb_audit_event';
 
-        execute 'alter extension auditlog add table ' || my_table;
+        execute 'alter extension auditlog add table auditlog.' || my_table;
 
     end loop;
 end;
@@ -155,7 +155,6 @@ drop function public.fn_redirect_audit_events() cascade;
 drop function public.fn_rotate_audit_events();
 drop function public.fn_update_audit_event_log_trigger_on_table(varchar);
 drop function public.fn_update_audit_fields();
-drop function public.fn_set_procpid_entity(int);
 drop function public.fn_get_procpid_entity();
 drop function public.fn_expire_procpid_entities();
 drop function public.fn_get_my_last_transaction_id();
@@ -173,7 +172,7 @@ drop table public.tb_procpid_entity;
 
 -- Redefine CET statement view
 
-CREATE OR REPLACE VIEW vw_audit_transaction_statement_cet as
+CREATE OR REPLACE VIEW auditlog.vw_audit_transaction_statement_cet as
    select ae.txid, ae.recorded,
           (case
           when ae.row_op = 'I' then
@@ -216,6 +215,10 @@ CREATE OR REPLACE VIEW vw_audit_transaction_statement_cet as
           ae.row_pk_val, ae.txid, ae.recorded
  order by ae.recorded, ae.audit_event;
 
+alter 
+
+alter database ises set search_path to public, auditlog;
+
 COMMIT;
 
 ----------------------------------------------------------------
@@ -253,12 +256,29 @@ update auditlog.tb_audit_event ae
   from public.tb_audit_transaction at
  where at.transaction_id = ae.txid;
 
-update auditlog.tb_audit_event ae
-   set audit_transaction_type = at.audit_transaction_type
-  from public.tb_audit_transaction_archive at
- where at.transaction_id = ae.txid;
+do language plpgsql
+ $_$
+begin
+    if (
+         select count(*)
+           from pg_class c
+           join pg_namespace n
+             on c.relnamespace = n.oid
+          where c.relname = 'tb_audit_transaction_archive'
+            and n.nspname = 'audit_log'
+       ) > 0
+    then
+        update auditlog.tb_audit_event ae
+           set audit_transaction_type = at.audit_transaction_type
+          from audit_log.tb_audit_transaction_archive at
+         where at.transaction_id = ae.txid;
 
-drop table audit_log.tb_audit_transaction_archive;
+        drop table audit_log.tb_audit_transaction_archive;
+    end if;
+end;
+ $_$;
+ 
+
 drop table public.tb_audit_transaction;
 drop table public.tb_audit_transaction_type;
 drop sequence if exists sq_pk_audit_transaction;
