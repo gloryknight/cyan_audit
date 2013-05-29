@@ -162,7 +162,6 @@ drop function public.fn_redirect_audit_events() cascade;
 drop function public.fn_rotate_audit_events();
 drop function public.fn_update_audit_event_log_trigger_on_table(varchar);
 drop function public.fn_update_audit_fields();
-drop function public.fn_get_procpid_entity();
 drop function public.fn_expire_procpid_entities();
 drop function public.fn_get_my_last_transaction_id();
 drop function public.fn_set_my_last_transaction_id(bigint);
