@@ -83,17 +83,24 @@ update auditlog.tb_audit_field af
 
 
 -- These columns were using fn_get_procpid_entity()
-alter table tb_program    alter column creator  set default auditlog.fn_get_audit_uid();
-alter table tb_program    alter column modifier set default auditlog.fn_get_audit_uid();
-alter table tb_project    alter column creator  set default auditlog.fn_get_audit_uid();
-alter table tb_project    alter column modifier set default auditlog.fn_get_audit_uid();
-alter table tb_reset      alter column creator  set default auditlog.fn_get_audit_uid();
-alter table tb_reset      alter column modifier set default auditlog.fn_get_audit_uid();
-alter table tb_task       alter column creator  set default auditlog.fn_get_audit_uid();
-alter table tb_task       alter column modifier set default auditlog.fn_get_audit_uid();
-alter table tb_reset_task alter column creator  set default auditlog.fn_get_audit_uid();
-alter table tb_reset_task alter column modifier set default auditlog.fn_get_audit_uid();
+-- alter table tb_program    alter column creator  set default auditlog.fn_get_audit_uid();
+-- alter table tb_program    alter column modifier set default auditlog.fn_get_audit_uid();
+-- alter table tb_project    alter column creator  set default auditlog.fn_get_audit_uid();
+-- alter table tb_project    alter column modifier set default auditlog.fn_get_audit_uid();
+-- alter table tb_reset      alter column creator  set default auditlog.fn_get_audit_uid();
+-- alter table tb_reset      alter column modifier set default auditlog.fn_get_audit_uid();
+-- alter table tb_task       alter column creator  set default auditlog.fn_get_audit_uid();
+-- alter table tb_task       alter column modifier set default auditlog.fn_get_audit_uid();
+-- alter table tb_reset_task alter column creator  set default auditlog.fn_get_audit_uid();
+-- alter table tb_reset_task alter column modifier set default auditlog.fn_get_audit_uid();
 
+create or replace function public.fn_get_procpid_entity ()
+returns integer as 
+ $_$
+    select current_setting('auditlog.uid')::integer;
+ $_$
+    language sql;
+    
 create or replace function public.fn_set_procpid_entity
 (
     in_entity integer

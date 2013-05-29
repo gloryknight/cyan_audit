@@ -728,6 +728,10 @@ begin
     create table @extschema@.tb_audit_event_current() 
         inherits ( @extschema@.tb_audit_event );
 
+    grant insert on @extschema@.tb_audit_event_current to public;
+    grant select (txid) on @extschema@.tb_audit_event_current to public;
+    grant update (audit_transaction_type) on @extschema@.tb_audit_event_current to public;
+
     -- add check constraint to new current table
     execute 'alter table @extschema@.tb_audit_event_current '
          || 'add constraint tb_audit_event_current_recorded_check '
@@ -1033,9 +1037,10 @@ grant select on all tables in schema @extschema@ to public;
 
 grant insert on @extschema@.tb_audit_event, 
                 @extschema@.tb_audit_event_current,
-                @extschema@.tb_audit_transaction_type 
+                @extschema@.tb_audit_transaction_type
         to public;
 
+grant select (txid) on @extschema@.tb_audit_event_current to public;
 grant update (audit_transaction_type) 
     on @extschema@.tb_audit_event_current to public;
 
