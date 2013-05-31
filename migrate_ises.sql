@@ -57,6 +57,8 @@ select setval('auditlog.sq_pk_audit_data_type', max(audit_data_type))
 insert into auditlog.tb_audit_transaction_type
 select * from public.tb_audit_transaction_type;
 
+select setval('auditlog.sq_pk_audit_transaction_type', max(audit_transaction_type))
+  from auditlog.tb_audit_transaction_type;
 
 -- Populate tb_audit_field, which will install logging triggers
 alter table auditlog.tb_audit_field
@@ -65,11 +67,11 @@ alter table auditlog.tb_audit_field
 insert into auditlog.tb_audit_field
 select * from public.tb_audit_field;
 
-alter table auditlog.tb_audit_field
-    enable trigger tr_check_audit_field_validity;
-
 select setval('auditlog.sq_pk_audit_field', max(audit_field))
   from auditlog.tb_audit_field;
+
+alter table auditlog.tb_audit_field
+    enable trigger tr_check_audit_field_validity;
 
 -- Now let's be sure we didn't miss anything
 select auditlog.fn_update_audit_fields();
@@ -220,8 +222,6 @@ CREATE OR REPLACE VIEW auditlog.vw_audit_transaction_statement_cet as
  group by af.table_name, ae.row_op, ae.audit_event, afpk.column_name,
           ae.row_pk_val, ae.txid, ae.recorded
  order by ae.recorded, ae.audit_event;
-
-alter 
 
 alter database ises set search_path to public, auditlog;
 
