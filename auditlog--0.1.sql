@@ -273,7 +273,8 @@ begin
 
     update tb_audit_event_current
        set audit_transaction_type = my_audit_transaction_type
-     where txid = in_txid;
+     where txid = in_txid
+       and audit_transaction_type is null;
 
     return in_txid;
 end

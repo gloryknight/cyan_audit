@@ -169,6 +169,7 @@ drop function public.fn_get_my_last_transaction_id();
 drop function public.fn_set_my_last_transaction_id(bigint);
 drop function public.fn_undo_my_last_transaction();
 drop function public.fn_undo_transaction(bigint);
+drop function public.fn_get_all_table_columns();
 
 
 -- Drop tables
