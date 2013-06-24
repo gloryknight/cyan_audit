@@ -42,8 +42,7 @@ alter table public.tb_audit_event
     add column audit_transaction_type integer;
 
 -- This needs to be set before we start logging to the new table
-select setval('auditlog.sq_pk_audit_event', max(audit_event))
-  from public.tb_audit_event;
+select setval('auditlog.sq_pk_audit_event', nextval('sq_op_sequence'));
 
 -- Populate audit data types
 insert into auditlog.tb_audit_data_type
