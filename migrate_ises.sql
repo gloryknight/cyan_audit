@@ -287,7 +287,8 @@ end;
 
 drop table public.tb_audit_transaction;
 drop table public.tb_audit_transaction_type;
-drop sequence if exists sq_pk_audit_transaction;
+drop sequence public.sq_pk_audit_transaction;
+drop sequence public.sq_op_sequence;
 
 -- Drop schema
 drop schema audit_log;
