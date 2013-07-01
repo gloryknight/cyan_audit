@@ -271,7 +271,7 @@ begin
     select @extschema@.fn_get_or_create_audit_transaction_type(in_label)
       into my_audit_transaction_type;
 
-    update tb_audit_event_current
+    update @extschema@.tb_audit_event_current
        set audit_transaction_type = my_audit_transaction_type
      where txid = in_txid
        and audit_transaction_type is null;
