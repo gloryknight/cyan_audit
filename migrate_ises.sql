@@ -1,8 +1,6 @@
 \set ON_ERROR_STOP
 \set ECHO all
 
-BEGIN;
-
 -- This is for on dev where this doesn't exist
 do language plpgsql
  $_$
@@ -224,73 +222,3 @@ CREATE OR REPLACE VIEW auditlog.vw_audit_transaction_statement_cet as
  order by ae.recorded, ae.audit_event;
 
 alter database ises set search_path to public, auditlog;
-
-COMMIT;
-
-----------------------------------------------------------------
-
-BEGIN;
-
-do language plpgsql 
- $_$
-declare
-    my_table    varchar;
-begin
-    for my_table in
-        select relname 
-          from pg_class c 
-          join pg_namespace n 
-            on c.relnamespace = n.oid 
-         where n.nspname = 'auditlog' 
-           and c.relkind = 'r'
-           and c.relname like 'tb_audit_event_%'
-    loop
-        execute 'alter table auditlog.' || my_table
-             || ' add foreign key(audit_field)'
-             || ' references auditlog.tb_audit_field';
-
-        execute 'alter table auditlog.' || my_table
-             || ' add foreign key(audit_transaction_type)'
-             || ' references auditlog.tb_audit_transaction_type';
-    end loop;
-end;
- $_$;
-
-
-update auditlog.tb_audit_event ae
-   set audit_transaction_type = at.audit_transaction_type
-  from public.tb_audit_transaction at
- where at.transaction_id = ae.txid;
-
-do language plpgsql
- $_$
-begin
-    if (
-         select count(*)
-           from pg_class c
-           join pg_namespace n
-             on c.relnamespace = n.oid
-          where c.relname = 'tb_audit_transaction_archive'
-            and n.nspname = 'audit_log'
-       ) > 0
-    then
-        update auditlog.tb_audit_event ae
-           set audit_transaction_type = at.audit_transaction_type
-          from audit_log.tb_audit_transaction_archive at
-         where at.transaction_id = ae.txid;
-
-        drop table audit_log.tb_audit_transaction_archive;
-    end if;
-end;
- $_$;
- 
-
-drop table public.tb_audit_transaction;
-drop table public.tb_audit_transaction_type;
-drop sequence public.sq_pk_audit_transaction;
-drop sequence public.sq_op_sequence;
-
--- Drop schema
-drop schema audit_log;
-
-COMMIT;
