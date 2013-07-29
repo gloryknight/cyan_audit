@@ -15,8 +15,6 @@ chdir $FindBin::Bin;
 system('psql -U postgres -d ises -1 -f migrate_ises.sql')
     and die "Error during migration\n";
 
-$handle->do('begin');
-
 sub update($)
 {
     print scalar localtime() . ": " . $_[0];

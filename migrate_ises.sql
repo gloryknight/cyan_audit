@@ -21,7 +21,7 @@ create table tt_audit_field as
 select *
   from tb_audit_field;
 
-update public.tb_audit_field set active = false;
+update public.tb_audit_field set active = false where active = true;
 
 -- Now that nothing else is creating audit events, rotate.
 select public.fn_rotate_audit_events();
@@ -79,7 +79,8 @@ update auditlog.tb_audit_field af
    set active = tt.active
   from tt_audit_field tt
  where tt.audit_field = af.audit_field
-   and tt.active;
+   and tt.active
+   and af.active != tt.active;
 
 
 -- These columns were using fn_get_procpid_entity()
