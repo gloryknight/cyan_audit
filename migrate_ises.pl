@@ -4,15 +4,18 @@ use strict;
 
 use DBI;
 use Data::Dumper;
+use FindBin;
 
-my $handle = DBI->connect('dbi:Pg:dbname=ises;host=isesdb', 'postgres', '',
+my $handle = DBI->connect('dbi:Pg:dbname=ises', 'postgres', '',
                           { AutoCommit => 1, ShowErrorStatement => 1 } )
     or die "Could not connect to database\n";
 
-#system('psql -U postgres -d ises -1 -f migrate_ises.sql')
-#    and die "Error during migration\n";
+chdir $FindBin::Bin;
 
-#$handle->do('begin');
+system('psql -U postgres -d ises -1 -f migrate_ises.sql')
+    and die "Error during migration\n";
+
+$handle->do('begin');
 
 sub update($)
 {
