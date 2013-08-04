@@ -843,7 +843,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
     uid                     integer not null default @extschema@.fn_get_audit_uid(),
     row_op                  char(1) not null CHECK (row_op in ('I','U','D')),
     txid                    bigint not null default txid_current(),
-    pid                     smallint not null default pg_backend_pid(),
+    pid                     integer not null default pg_backend_pid(),
     audit_transaction_type  integer 
                             references @extschema@.tb_audit_transaction_type,
     old_value               text,
