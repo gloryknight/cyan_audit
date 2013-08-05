@@ -164,7 +164,7 @@ begin
 
     if( NEW.table_pk is null ) then
 
-        my_pk_col := fn_get_table_pk_col(NEW.table_name);
+        my_pk_col := @extschema@.fn_get_table_pk_col(NEW.table_name);
 
         if my_pk_col is null then
             raise exception 'Cannot audit table %: No PK column found',
