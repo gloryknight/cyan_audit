@@ -4,7 +4,7 @@ SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_data_type', '')
 do 
  $$ 
 declare 
-    my_statement text; 
+    my_function text; 
 begin 
     for my_function in
         select p.proname 
