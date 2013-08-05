@@ -156,10 +156,11 @@ begin
            NEW.column_name != OLD.column_name
         then
             raise exception 'Updating table_name or column_name not allowed.';
-        elsif NEW.active = false
-        then
-            return NEW;
         end if;
+    end if;
+
+    if NEW.active = false then
+        return NEW;
     end if;
 
     if( NEW.table_pk is null ) then
@@ -197,4 +198,5 @@ begin
 end
  $_$
     language plpgsql;
+
 
