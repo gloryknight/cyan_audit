@@ -797,8 +797,8 @@ create sequence @extschema@.sq_pk_audit_field;
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
 (
     audit_field     integer primary key default nextval('@extschema@.sq_pk_audit_field'),
-    table_name      varchar,
-    column_name     varchar,
+    table_name      varchar not null,
+    column_name     varchar not null,
     audit_data_type integer not null references @extschema@.tb_audit_data_type,   
     table_pk        integer not null references @extschema@.tb_audit_field,
     active          boolean not null default true,
@@ -965,7 +965,7 @@ CREATE TRIGGER tr_audit_event_log_trigger_updater
 
 
 -- fn_check_audit_field_validity
-CREATE OR REPLACE FUNCTION @extschema@.fn_check_audit_field_validity() 
+CREATE OR REPLACE FUNCTION @extschema@.fn_check_audit_field_validity()
 returns trigger as
  $_$
 declare
@@ -983,19 +983,23 @@ begin
         end if;
     end if;
 
-    my_pk_col := fn_get_table_pk_col(NEW.table_name);
+    if( NEW.table_pk is null ) then
 
-    if my_pk_col is null then
-        raise exception 'Cannot audit table %: No PK column found',
-            NEW.table_name;
+        my_pk_col := fn_get_table_pk_col(NEW.table_name);
+
+        if my_pk_col is null then
+            raise exception 'Cannot audit table %: No PK column found',
+                NEW.table_name;
+        end if;
+
+        if my_pk_col = NEW.column_name then
+            NEW.table_pk := NEW.audit_field;
+        else
+            select @extschema@.fn_get_or_create_audit_field(NEW.table_name, my_pk_col)
+              into NEW.table_pk;
+        end if;
     end if;
 
-    if my_pk_col = NEW.column_name then
-        NEW.table_pk := NEW.audit_field;
-    else
-        select @extschema@.fn_get_or_create_audit_field(NEW.table_name, my_pk_col)
-          into NEW.table_pk;
-    end if;
 
     my_audit_data_type := @extschema@.fn_get_or_create_audit_data_type(
         @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
@@ -1005,7 +1009,7 @@ begin
         NEW.audit_data_type := my_audit_data_type;
     else
         if TG_OP = 'INSERT' then
-            raise exception 'Invalid audit field %.%', 
+            raise exception 'Invalid audit field %.%',
                 NEW.table_name, NEW.column_name;
         end if;
     end if;
@@ -1014,6 +1018,7 @@ begin
 end
  $_$
     language plpgsql;
+
 
 drop trigger if exists tr_check_audit_field_validity
     on @extschema@.tb_audit_field;

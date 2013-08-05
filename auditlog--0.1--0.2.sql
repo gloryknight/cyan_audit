@@ -1,7 +1,10 @@
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_field', '');
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_data_type', '');
 
-do 
+ALTER TABLE @extschema@.tb_audit_field alter column column_name set not null;
+ALTER TABLE @extschema@.tb_audit_field alter column table_name set not null;
+
+DO LANGUAGE plpgsql
  $$ 
 declare 
     my_function text; 
@@ -140,4 +143,58 @@ my $tg_q = "CREATE TRIGGER tr_log_audit_event_$table_name "
 eval { spi_exec_query($tg_q) };
  $_$
     language 'plperl';
+
+CREATE OR REPLACE FUNCTION @extschema@.fn_check_audit_field_validity()
+returns trigger as
+ $_$
+declare
+    my_pk_col           varchar;
+    my_audit_data_type  integer;
+begin
+    if TG_OP = 'UPDATE' then
+        if NEW.table_name  != OLD.table_name or
+           NEW.column_name != OLD.column_name
+        then
+            raise exception 'Updating table_name or column_name not allowed.';
+        elsif NEW.active = false
+        then
+            return NEW;
+        end if;
+    end if;
+
+    if( NEW.table_pk is null ) then
+
+        my_pk_col := fn_get_table_pk_col(NEW.table_name);
+
+        if my_pk_col is null then
+            raise exception 'Cannot audit table %: No PK column found',
+                NEW.table_name;
+        end if;
+
+        if my_pk_col = NEW.column_name then
+            NEW.table_pk := NEW.audit_field;
+        else
+            select @extschema@.fn_get_or_create_audit_field(NEW.table_name, my_pk_col)
+              into NEW.table_pk;
+        end if;
+    end if;
+
+
+    my_audit_data_type := @extschema@.fn_get_or_create_audit_data_type(
+        @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
+    );
+
+    if my_audit_data_type is not null then
+        NEW.audit_data_type := my_audit_data_type;
+    else
+        if TG_OP = 'INSERT' then
+            raise exception 'Invalid audit field %.%',
+                NEW.table_name, NEW.column_name;
+        end if;
+    end if;
+
+    return NEW;
+end
+ $_$
+    language plpgsql;
 
