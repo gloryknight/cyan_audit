@@ -180,8 +180,9 @@ drop table public.tb_procpid_entity;
 
 -- Redefine CET statement view
 
-CREATE OR REPLACE VIEW auditlog.vw_audit_transaction_statement_cet as
-   select ae.txid, ae.recorded,
+CREATE OR REPLACE VIEW public.vw_audit_transaction_statement_cet as
+   select ae.txid as transaction_id, 
+          min(ae.recorded) as recorded,
           (case
           when ae.row_op = 'I' then
                'INSERT INTO ' || af.table_name || ' ('
@@ -219,8 +220,8 @@ CREATE OR REPLACE VIEW auditlog.vw_audit_transaction_statement_cet as
      join auditlog.tb_audit_field afpk on af.table_pk = afpk.audit_field
      join public.tb_system_audit_field saf
        on af.audit_field = saf.audit_field and saf.system = 4 -- CET
- group by af.table_name, ae.row_op, ae.audit_event, afpk.column_name,
-          ae.row_pk_val, ae.txid, ae.recorded
- order by ae.recorded, ae.audit_event;
+ group by af.table_name, ae.row_op, afpk.column_name,
+          ae.row_pk_val, ae.txid
+ order by 2;
 
 alter database ises set search_path to public, auditlog;
