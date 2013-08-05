@@ -789,8 +789,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_data_type
 alter sequence @extschema@.sq_pk_audit_data_type
     owned by @extschema@.tb_audit_data_type.audit_data_type;
 
-
-
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_data_type','');
 
 -- tb_audit_field
 create sequence @extschema@.sq_pk_audit_field;
@@ -811,7 +810,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
 alter sequence @extschema@.sq_pk_audit_field
     owned by @extschema@.tb_audit_field.audit_field;
 
-SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_field', '');
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_field','');
 
 
 -- tb_audit_transaction_type
