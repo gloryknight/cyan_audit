@@ -558,8 +558,20 @@ my $pk_col = $pk_rv->{'rows'}[0]{'pk_col'};
 
 unless( $pk_col )
 {
-    elog(NOTICE, 'pk_col is null');
-    return;
+    my $pk2_q = "select column_name as pk_col "
+              . "  from @extschema@.tb_audit_field "
+              . " where table_pk = audit_field "
+              . "   and table_name = '$table_name'";
+
+    my $pk2_rv = spi_exec_query($pk2_q);
+
+    my $pk_col = $pk2_rv->{'rows'}[0]{'pk_col'};
+
+    unless( $pk_col )
+    {
+        elog(NOTICE, 'pk_col is null');
+        return;
+    }
 }
 
 my $fn_q = "CREATE OR REPLACE FUNCTION "
