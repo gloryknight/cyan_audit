@@ -983,7 +983,7 @@ begin
     perform c.relname
        from pg_class c
        join pg_namespace n
-         on c.relname = n.oid
+         on c.relnamespace = n.oid
       where n.nspname = 'public'
         and c.relname = my_table_name;
 
