@@ -517,6 +517,7 @@ begin
     my_function_name := 'fn_log_audit_event_'||in_table_name;
 
     set client_min_messages to warning;
+    execute 'alter extension auditlog drop function @extschema@'||my_function_name;
     execute 'drop function if exists '
          || '@extschema@.'||my_function_name||'() cascade';
     set client_min_messages to notice;
@@ -555,7 +556,7 @@ if( $table_rv->{'processed'} == 0 )
 }
 
 my $colnames_q = "select audit_field, column_name "
-               . "  from \@extschema@.tb_audit_field "
+               . "  from @extschema@.tb_audit_field "
                . " where table_name = '$table_name' "
                . "   and active = true ";
 
@@ -563,13 +564,13 @@ my $colnames_rv = spi_exec_query($colnames_q);
 
 if( $colnames_rv->{'processed'} == 0 )
 {
-    my $q = "select \@extschema@.fn_drop_audit_event_log_trigger('$table_name')";
+    my $q = "select @extschema@.fn_drop_audit_event_log_trigger('$table_name')";
     eval{ spi_exec_query($q) };
     elog(ERROR, $@) if $@;
     return;
 }
 
-my $pk_q = "select \@extschema@.fn_get_table_pk_col('$table_name') as pk_col ";
+my $pk_q = "select @extschema@.fn_get_table_pk_col('$table_name') as pk_col ";
 
 my $pk_rv = spi_exec_query($pk_q);
 
@@ -593,10 +594,8 @@ unless( $pk_col )
     }
 }
 
-elog(NOTICE, "pk_col = $pk_col");
-
 my $fn_q = <<EOF;
-CREATE OR REPLACE FUNCTION \@extschema@.fn_log_audit_event_$table_name()
+CREATE OR REPLACE FUNCTION @extschema@.fn_log_audit_event_$table_name()
 returns trigger as
  \$_\$
 -- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT
@@ -623,11 +622,11 @@ BEGIN
         my_old_row := OLD;
     end if;
 
-    if current_setting('\@extschema@.enabled') = '0' then
+    if current_setting('@extschema@.enabled') = '0' then
         return my_new_row;
     end if;
 
-    perform \@extschema@.fn_set_last_audit_txid();
+    perform @extschema@.fn_set_last_audit_txid();
 
     my_recorded := clock_timestamp();
 
@@ -646,7 +645,7 @@ foreach my $row (@{$colnames_rv->{'rows'}})
         my_old_row.${column_name}::text) OR
        (TG_OP = 'DELETE')
     THEN
-        perform \@extschema@.fn_new_audit_event(
+        perform @extschema@.fn_new_audit_event(
                     $audit_field,
                     my_row_pk_val,
                     my_recorded,
