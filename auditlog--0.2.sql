@@ -291,7 +291,11 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_audit_transaction
 returns bigint as
  $_$
 begin
-    return @extschema@.fn_label_audit_transaction(in_label, fn_get_last_audit_txid());
+    return @extschema@.fn_label_audit_transaction
+           (
+                in_label, 
+                @extschema@.fn_get_last_audit_txid()
+           );
 end
  $_$
     language 'plpgsql' strict;
