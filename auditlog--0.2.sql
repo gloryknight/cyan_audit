@@ -535,6 +535,21 @@ my $table_name = $_[0];
 
 return if $table_name =~ 'tb_audit_.*';
 
+my $table_q = "select relname "
+            . "  from pg_class c "
+            . "  join pg_namespace n "
+            . "    on c.relnamespace = n.oid "
+            . " where n.nspname = 'public' "
+            . "   and c.relname = '$table_name' ";
+
+my $table_rv = spi_exec_query($table_q);
+
+if( $table_rv->{'processed'} == 0 )
+{
+    elog(NOTICE, "Cannot audit invalid table '$table_name'");
+    return;
+}
+
 my $colnames_q = "select audit_field, column_name "
                . "  from @extschema@.tb_audit_field "
                . " where table_name = '$table_name' "
@@ -652,6 +667,10 @@ my $tg_q = "CREATE TRIGGER tr_log_audit_event_$table_name "
          . "   after insert or update or delete on $table_name for each row "
          . "   execute procedure @extschema@.fn_log_audit_event_$table_name()";
 eval { spi_exec_query($tg_q) };
+
+my $ext_q = "ALTER EXTENSION auditlog ADD FUNCTION @extschema@.fn_log_audit_event_$table_name()";
+
+eval { spi_exec_query($ext_q) };
  $_$
     language 'plperl';
 
@@ -961,7 +980,16 @@ begin
         my_table_name := NEW.table_name;
     end if;
 
-    perform @extschema@.fn_update_audit_event_log_trigger_on_table(my_table_name);
+    perform c.relname
+       from pg_class c
+       join pg_namespace n
+         on c.relname = n.oid
+      where n.nspname = 'public'
+        and c.relname = my_table_name;
+
+    if found then
+        perform @extschema@.fn_update_audit_event_log_trigger_on_table(my_table_name);
+    end if;
     return new;
 end
  $_$
