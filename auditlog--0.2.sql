@@ -555,7 +555,7 @@ if( $table_rv->{'processed'} == 0 )
 }
 
 my $colnames_q = "select audit_field, column_name "
-               . "  from @extschema@.tb_audit_field "
+               . "  from \@extschema@.tb_audit_field "
                . " where table_name = '$table_name' "
                . "   and active = true ";
 
@@ -563,13 +563,13 @@ my $colnames_rv = spi_exec_query($colnames_q);
 
 if( $colnames_rv->{'processed'} == 0 )
 {
-    my $q = "select @extschema@.fn_drop_audit_event_log_trigger('$table_name')";
+    my $q = "select \@extschema@.fn_drop_audit_event_log_trigger('$table_name')";
     eval{ spi_exec_query($q) };
     elog(ERROR, $@) if $@;
     return;
 }
 
-my $pk_q = "select @extschema@.fn_get_table_pk_col('$table_name') as pk_col ";
+my $pk_q = "select \@extschema@.fn_get_table_pk_col('$table_name') as pk_col ";
 
 my $pk_rv = spi_exec_query($pk_q);
 
@@ -584,7 +584,7 @@ unless( $pk_col )
 
     my $pk2_rv = spi_exec_query($pk2_q);
 
-    my $pk_col = $pk2_rv->{'rows'}[0]{'pk_col'};
+    $pk_col = $pk2_rv->{'rows'}[0]{'pk_col'};
 
     unless( $pk_col )
     {
@@ -593,76 +593,87 @@ unless( $pk_col )
     }
 }
 
-my $fn_q = "CREATE OR REPLACE FUNCTION "
-         . "    @extschema@.fn_log_audit_event_$table_name()\n"
-         . "returns trigger as \n"
-         . " \$_\$\n"
-         . "-- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT\n"
-         . "DECLARE\n"
-         . "    my_row_pk_val       integer;\n"
-         . "    my_old_row          record;\n"
-         . "    my_new_row          record;\n"
-         . "    my_recorded         timestamp;\n"
-         . "BEGIN\n"
-         . "    if current_setting('@extschema@.enabled') = '0' then\n"
-         . "        return my_new_row;\n"
-         . "    end if;\n"
-         . "    \n"
-         . "    perform @extschema@.fn_set_last_audit_txid();\n"
-         . "    \n"
-         . "    my_recorded := clock_timestamp();\n"
-         . "    \n"
-         . "    if( TG_OP = 'INSERT' ) then\n"
-         . "        my_row_pk_val := NEW.$pk_col;\n"
-         . "    else\n"
-         . "        my_row_pk_val := OLD.$pk_col;\n"
-         . "    end if;\n"
-         . "    \n"
-         . "    if( TG_OP = 'DELETE' ) then\n"
-         . "        my_new_row := OLD;\n"
-         . "    else\n"
-         . "        my_new_row := NEW;\n"
-         . "    end if;\n\n"
-         . "    if( TG_OP = 'INSERT' ) then\n"
-         . "        my_old_row := NEW;\n"
-         . "    else\n"
-         . "        my_old_row := OLD;\n"
-         . "    end if;\n\n";
+elog(NOTICE, "pk_col = $pk_col");
+
+my $fn_q = <<EOF;
+CREATE OR REPLACE FUNCTION \@extschema@.fn_log_audit_event_$table_name()
+returns trigger as
+ \$_\$
+-- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT
+DECLARE
+    my_row_pk_val       integer;
+    my_old_row          record;
+    my_new_row          record;
+    my_recorded         timestamp;
+BEGIN
+    if( TG_OP = 'INSERT' ) then
+        my_row_pk_val := NEW.$pk_col;
+    else
+        my_row_pk_val := OLD.$pk_col;
+    end if;
+
+    if( TG_OP = 'DELETE' ) then
+        my_new_row := OLD;
+    else
+        my_new_row := NEW;
+    end if;
+    if( TG_OP = 'INSERT' ) then
+        my_old_row := NEW;
+    else
+        my_old_row := OLD;
+    end if;
+
+    if current_setting('\@extschema@.enabled') = '0' then
+        return my_new_row;
+    end if;
+
+    perform \@extschema@.fn_set_last_audit_txid();
+
+    my_recorded := clock_timestamp();
+
+EOF
 
 foreach my $row (@{$colnames_rv->{'rows'}})
 {
     my $column_name = $row->{'column_name'};
     my $audit_field = $row->{'audit_field'};
 
-    $fn_q .= "    IF (TG_OP = 'INSERT' AND\n"
-          .  "        my_new_row.$column_name IS NOT NULL) OR\n"
-          .  "       (TG_OP = 'UPDATE' AND\n"
-          .  "        my_new_row.${column_name}::text IS DISTINCT FROM\n"
-          .  "        my_old_row.${column_name}::text) OR\n"
-          .  "       (TG_OP = 'DELETE')\n"
-          .  "    THEN\n"
-          .  "        perform @extschema@.fn_new_audit_event(\n "
-          .  "                    $audit_field,\n"
-          .  "                    my_row_pk_val,\n"
-          .  "                    my_recorded,\n"
-          .  "                    TG_OP,\n"
-          .  "                    my_old_row.$column_name,\n"
-          .  "                    my_new_row.$column_name\n"
-          .  "                );\n"
-          .  "    END IF;\n\n";
+    $fn_q .= <<EOF
+    IF (TG_OP = 'INSERT' AND
+        my_new_row.$column_name IS NOT NULL) OR
+       (TG_OP = 'UPDATE' AND
+        my_new_row.${column_name}::text IS DISTINCT FROM
+        my_old_row.${column_name}::text) OR
+       (TG_OP = 'DELETE')
+    THEN
+        perform \@extschema@.fn_new_audit_event(
+                    $audit_field,
+                    my_row_pk_val,
+                    my_recorded,
+                    TG_OP,
+                    my_old_row.$column_name,
+                    my_new_row.$column_name
+                );
+    END IF;
+
+EOF
 }
 
-$fn_q .= "    return NEW; \n"
-      .  "EXCEPTION\n"
-      .  "    WHEN undefined_function THEN\n"
-      .  "         raise notice 'undefined function';\n"
-      .  "         return NEW;\n"
-      .  "    WHEN invalid_column_reference THEN\n"
-      .  "         raise notice 'invalid column reference';\n"
-      .  "         return NEW;\n"
-      .  "END\n"
-      .  " \$_\$ \n"
-      .  "    language 'plpgsql'; ";
+$fn_q .= <<EOF;
+    return NEW;
+EXCEPTION
+    WHEN undefined_function THEN
+         raise notice 'undefined function';
+         return NEW;
+    WHEN invalid_column_reference THEN
+         raise notice 'invalid column reference';
+         return NEW;
+END
+ \$_\$
+    language 'plpgsql';
+EOF
+
+elog(NOTICE, $fn_q);
 
 eval { spi_exec_query($fn_q) };
 elog(ERROR, $@) if $@;
