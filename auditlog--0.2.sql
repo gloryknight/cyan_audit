@@ -1025,7 +1025,6 @@ begin
     end if;
 
     if( NEW.table_pk is null ) then
-
         my_pk_col := @extschema@.fn_get_table_pk_col(NEW.table_name);
 
         if my_pk_col is null then
@@ -1041,18 +1040,10 @@ begin
         end if;
     end if;
 
-
-    my_audit_data_type := @extschema@.fn_get_or_create_audit_data_type(
-        @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
-    );
-
-    if my_audit_data_type is not null then
-        NEW.audit_data_type := my_audit_data_type;
-    else
-        if TG_OP = 'INSERT' then
-            raise exception 'Invalid audit field %.%',
-                NEW.table_name, NEW.column_name;
-        end if;
+    if NEW.audit_data_type is null then
+        NEW.audit_data_type := @extschema@.fn_get_or_create_audit_data_type(
+            @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
+        );
     end if;
 
     return NEW;
