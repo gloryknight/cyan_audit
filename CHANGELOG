@@ -1,0 +1,9 @@
+0.1 -> 0.2
+----------
+fn_update_audit_log_trigger_on_table()
+Config tables tb_audit_field and tb_audit_data_type
+
+0.2 -> 0.3
+----------
+Lots of fixes for dump/restore and schema qualification
+Added sequences sq_pk_audit_field and sq_pk_audit_data_type as config data
