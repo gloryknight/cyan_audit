@@ -236,8 +236,6 @@ eval { spi_exec_query($ext_q) };
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_data_type','');
 
 -- tb_audit_field
-create sequence @extschema@.sq_pk_audit_field;
-
 alter table @extschema@.tb_audit_field
     alter column table_name set not null,
     alter column column_name set not null;
