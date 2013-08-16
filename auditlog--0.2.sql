@@ -510,16 +510,40 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_drop_audit_event_log_trigger
 returns void as
  $_$
 declare
-    my_trigger_name     varchar;
     my_function_name    varchar;
-    my_trigger_table    varchar;
 begin
     my_function_name := 'fn_log_audit_event_'||in_table_name;
 
     set client_min_messages to warning;
-    execute 'alter extension auditlog drop function @extschema@'||my_function_name;
-    execute 'drop function if exists '
-         || '@extschema@.'||my_function_name||'() cascade';
+
+    perform p.proname
+       from pg_catalog.pg_depend d
+       join pg_catalog.pg_proc p
+         on d.classid = 'pg_proc'::regclass::oid
+        and d.objid = p.oid
+       join pg_catalog.pg_extension e
+         on d.refclassid = 'pg_extension'::regclass::oid
+        and d.refobjid = e.oid
+      where e.extname = 'auditlog'
+        and p.proname = my_function_name;
+
+    if found then
+        execute 'alter extension auditlog drop function '
+             || '@extschema@.' || my_function_name|| '()';
+    end if;
+
+    perform p.proname
+       from pg_proc p
+       join pg_namespace n
+         on p.pronamespace = n.oid
+        and n.nspname = 'public'
+      where p.proname = '@extschema@.my_function_name';
+
+    if found then
+        execute 'drop function '
+             || '@extschema@.'||my_function_name||'() cascade';
+    end if;
+
     set client_min_messages to notice;
 end
  $_$
@@ -566,7 +590,7 @@ if( $colnames_rv->{'processed'} == 0 )
 {
     my $q = "select @extschema@.fn_drop_audit_event_log_trigger('$table_name')";
     eval{ spi_exec_query($q) };
-    elog(ERROR, $@) if $@;
+    elog(ERROR, "fn_drop_audit_event_log_trigger: $@") if($@);
     return;
 }
 
@@ -671,8 +695,6 @@ END
  \$_\$
     language 'plpgsql';
 EOF
-
-elog(NOTICE, $fn_q);
 
 eval { spi_exec_query($fn_q) };
 elog(ERROR, $@) if $@;
