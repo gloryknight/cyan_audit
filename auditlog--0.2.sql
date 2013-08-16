@@ -538,7 +538,7 @@ use strict;
 
 my $table_name = $_[0];
 
-return if $table_name =~ 'tb_audit_.*';
+return if $table_name =~ /tb_audit_.*/;
 
 my $table_q = "select relname "
             . "  from pg_class c "
@@ -589,7 +589,7 @@ unless( $pk_col )
 
     unless( $pk_col )
     {
-        elog(NOTICE, 'pk_col is null');
+        elog(NOTICE, "pk_col is null");
         return;
     }
 }
@@ -637,7 +637,7 @@ foreach my $row (@{$colnames_rv->{'rows'}})
     my $column_name = $row->{'column_name'};
     my $audit_field = $row->{'audit_field'};
 
-    $fn_q .= <<EOF
+    $fn_q .= <<EOF;
     IF (TG_OP = 'INSERT' AND
         my_new_row.$column_name IS NOT NULL) OR
        (TG_OP = 'UPDATE' AND
