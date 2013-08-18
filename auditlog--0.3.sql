@@ -792,9 +792,14 @@ begin
     create table @extschema@.tb_audit_event_current() 
         inherits ( @extschema@.tb_audit_event );
 
+    alter extension auditlog
+        add table @extschema@.tb_audit_event_current;
+
     grant insert on @extschema@.tb_audit_event_current to public;
-    grant select (txid) on @extschema@.tb_audit_event_current to public;
-    grant update (audit_transaction_type) on @extschema@.tb_audit_event_current to public;
+    grant select (audit_transaction_type,txid) 
+       on @extschema@.tb_audit_event_current to public;
+    grant update (audit_transaction_type) 
+       on @extschema@.tb_audit_event_current to public;
 
     -- add check constraint to new current table
     execute 'alter table @extschema@.tb_audit_event_current '
@@ -1111,9 +1116,10 @@ grant insert on @extschema@.tb_audit_event,
                 @extschema@.tb_audit_transaction_type
         to public;
 
-grant select (txid) on @extschema@.tb_audit_event_current to public;
+grant select (audit_transaction_type, txid) 
+   on @extschema@.tb_audit_event_current to public;
 grant update (audit_transaction_type) 
-    on @extschema@.tb_audit_event_current to public;
+   on @extschema@.tb_audit_event_current to public;
 
 revoke select on @extschema@.tb_audit_event from public;
 
