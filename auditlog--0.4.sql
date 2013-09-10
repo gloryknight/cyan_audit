@@ -536,8 +536,8 @@ begin
        from pg_proc p
        join pg_namespace n
          on p.pronamespace = n.oid
-        and n.nspname = 'public'
-      where p.proname = '@extschema@.my_function_name';
+        and n.nspname = '@extschema@'
+      where p.proname = my_function_name;
 
     if found then
         execute 'drop function '
