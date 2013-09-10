@@ -157,3 +157,53 @@ eval { spi_exec_query($ext_q) };
  $_$
     language 'plperl';
 
+
+
+-- fn_drop_audit_event_log_trigger
+CREATE OR REPLACE FUNCTION @extschema@.fn_drop_audit_event_log_trigger 
+(
+    in_table_name   varchar
+)
+returns void as
+ $_$
+declare
+    my_function_name    varchar;
+begin
+    my_function_name := 'fn_log_audit_event_'||in_table_name;
+
+    set client_min_messages to warning;
+
+    perform p.proname
+       from pg_catalog.pg_depend d
+       join pg_catalog.pg_proc p
+         on d.classid = 'pg_proc'::regclass::oid
+        and d.objid = p.oid
+       join pg_catalog.pg_extension e
+         on d.refclassid = 'pg_extension'::regclass::oid
+        and d.refobjid = e.oid
+      where e.extname = 'auditlog'
+        and p.proname = my_function_name;
+
+    if found then
+        execute 'alter extension auditlog drop function '
+             || '@extschema@.' || my_function_name|| '()';
+    end if;
+
+    perform p.proname
+       from pg_proc p
+       join pg_namespace n
+         on p.pronamespace = n.oid
+        and n.nspname = '@extschema@'
+      where p.proname = my_function_name;
+
+    if found then
+        execute 'drop function '
+             || '@extschema@.'||my_function_name||'() cascade';
+    end if;
+
+    set client_min_messages to notice;
+end
+ $_$
+    language 'plpgsql';
+
+
