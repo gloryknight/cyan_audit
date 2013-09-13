@@ -35,16 +35,16 @@ sub usage
 }
 
 
-getopt('m:o:U:h:p:d:zr', \%opts) or usage();
+getopts('m:o:U:h:p:d:zr', \%opts) or usage();
 
 my $months = $opts{'m'};
 
-unless( $months )
+unless( defined $months )
 {
     usage("Must specify a number of months of audit data to keep ( -m )");
 }
 
-unless( $months =~ /^\d+$/ and $months > 0 and $months < 120 )
+unless( $months =~ /^\d+$/ and $months >= 0 and $months < 120 )
 {
     usage("Invalid number of months '$months' specified");
 }
@@ -147,7 +147,7 @@ foreach my $table_row (@$table_rows)
 
     my $open_str = "> $outdir/$table.csv";
 
-    if( exists $opts{'z'} )
+    if( $opts{'z'} )
     {
         $open_str = "| gzip -9 -c $open_str.gz";
     }
@@ -179,11 +179,11 @@ foreach my $table_row (@$table_rows)
     my $data_q = "   select ae.audit_event, "
                . "          ae.txid, "
                . "          ae.recorded, "
+               . "          ae.uid, "
+               . "          u.$user_table_email_col, "
                . "          af.table_name, "
                . "          af.column_name, "
                . "          ae.row_pk_val, "
-               . "          ae.uid, "
-               . "          u.$user_table_email_col, "
                . "          ae.row_op, "
                . "          ae.pid, "
                . "          att.label as description, "
@@ -207,7 +207,7 @@ foreach my $table_row (@$table_rows)
     {
         print $fh $row;
 
-        if( $row_count > 1 and $row_count % 1000 == 1 )
+        if( $row_count > 1 and $row_count % 10000 == 1 )
         {
             (my $current_audit_event = $row) =~ s/,.*$//s;
 
@@ -220,6 +220,14 @@ foreach my $table_row (@$table_rows)
     }
 
     print "Done!\n";
+
+    if( $opts{'r'} )
+    {
+        print "Dropping table $schema.$table... ";
+        $handle->do("alter extension auditlog drop table $schema.$table");
+        $handle->do("drop table $schema.$table");
+        print "Done\n";
+    }
 }
 
 
