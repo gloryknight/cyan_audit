@@ -1,0 +1,6 @@
+Add support for logging schemas other than public
+Add correct handling of audit table space
+Add checking to ensure no logging of auditlog schema
+Package for pgxn
+Add checking for correct version of Postgres
+Script to archive and drop old tables
