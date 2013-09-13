@@ -123,7 +123,7 @@ unless( $user_table and $user_table_email_col and $user_table_uid_col )
 }
 
 my $tables_q = "select c.relname, "
-             . "       pg_size_pretty(pg_relation_size(c.oid)) "
+             . "       pg_size_pretty(pg_total_relation_size(c.oid)) "
              . "  from pg_class c "
              . "  join pg_namespace n "
              . "    on c.relnamespace = n.oid "
@@ -207,11 +207,11 @@ foreach my $table_row (@$table_rows)
     {
         print $fh $row or die "Error writing to file: $!\n";
 
-        if( $row_count > 1 and $row_count % 10000 == 1 )
+        if( $row_count > 1 and $row_count % 1000 == 1 )
         {
             (my $current_audit_event = $row) =~ s/,.*$//s;
 
-            printf "\r$exporting_msg: %0.2f%% complete... ",
+            printf "\r$exporting_msg: %0.1f%% complete... ",
                 100 * ($current_audit_event - $min_audit_event) /
                       ($max_audit_event - $min_audit_event);
         }
