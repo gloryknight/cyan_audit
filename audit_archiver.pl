@@ -205,7 +205,7 @@ foreach my $table_row (@$table_rows)
 
     while( $handle->pg_getcopydata(\$row) >= 0 )
     {
-        print $fh $row;
+        print $fh $row or die "Error writing to file: $!\n";
 
         if( $row_count > 1 and $row_count % 10000 == 1 )
         {
