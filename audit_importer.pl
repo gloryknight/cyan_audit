@@ -212,16 +212,21 @@ __EOF__
     $handle->do( "ALTER TABLE tb_audit_event_restore RENAME TO tb_audit_event_$table_suffix" )
          or die( "Could not rename tb_audit_event_restore to tb_audit_event_$table_suffix\n" );
 
-    my $constraint_q = <<__EOF__;
+    my $constraint_q = '';
+    print "Adding constraints...\n" if( DEBUG );
+    $constraint_q = <<__EOF__;
     ALTER TABLE tb_audit_event_${table_suffix}
         ADD tb_audit_event_${table_suffix}_recorded_check
-        CHECK ( recorded >= ${min_rec}::TIMESTAMP AND recorded <= ${max_rec}::TIMESTAMP ),
+        CHECK ( recorded >= ${min_rec}::TIMESTAMP AND recorded <= ${max_rec}::TIMESTAMP )
+__EOF__
+    $handle->do( $constraint_q ) or die( "Could not add recorded constraint to table partition\n" );
+    $constraint_q = <<__EOF__;
+    ALTER TABLE tb_audit_event_${table_suffix}
         ADD tb_audit_event_${table_suffix}_txid_check
         CHECK ( txid >= ${min_txid}::BIGINT AND txid <= ${max_txid}::BIGINT )
 __EOF__
+    $handle->do( $constraint_q ) or die( "Could not add txid constraint to table partition\n" );
 
-    print "Adding constraints...\n" if( DEBUG );
-    $handle->do( $constraint_q ) or die( "Could not add constraints to table partition\n" );
 
     print "Generating indexes...\n" if( DEBUG );
     $handle->do( "CREATE INDEX tb_audit_event_${table_suffix}_audit_field_idx ON tb_audit_event_${table_suffix}(audit_field)" );
