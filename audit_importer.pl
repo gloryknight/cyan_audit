@@ -207,31 +207,38 @@ __EOF__
     my $min_rec      = $max_recorded_row->{'min_recorded'};
     my $max_txid     = $max_recorded_row->{'max_txid'    };
     my $min_txid     = $max_recorded_row->{'min_txid'    };
-   
+    my $table_name   = "tb_audit_event_$table_suffix";
     print "Renaming table...\n" if( DEBUG ); 
-    $handle->do( "ALTER TABLE tb_audit_event_restore RENAME TO tb_audit_event_$table_suffix" )
-         or die( "Could not rename tb_audit_event_restore to tb_audit_event_$table_suffix\n" );
+    $handle->do( "ALTER TABLE ${schema}.tb_audit_event_restore RENAME TO $table_name" )
+         or die( "Could not rename tb_audit_event_restore to $table_name\n" );
 
     my $constraint_q = '';
     print "Adding constraints...\n" if( DEBUG );
     $constraint_q = <<__EOF__;
-    ALTER TABLE tb_audit_event_${table_suffix}
+    ALTER TABLE ${schema}.${table_name}
         ADD tb_audit_event_${table_suffix}_recorded_check
         CHECK ( recorded >= ${min_rec}::TIMESTAMP AND recorded <= ${max_rec}::TIMESTAMP )
 __EOF__
     $handle->do( $constraint_q ) or die( "Could not add recorded constraint to table partition\n" );
     $constraint_q = <<__EOF__;
-    ALTER TABLE tb_audit_event_${table_suffix}
+    ALTER TABLE ${schema}.${table_name}
         ADD tb_audit_event_${table_suffix}_txid_check
         CHECK ( txid >= ${min_txid}::BIGINT AND txid <= ${max_txid}::BIGINT )
 __EOF__
     $handle->do( $constraint_q ) or die( "Could not add txid constraint to table partition\n" );
-
-
+    
     print "Generating indexes...\n" if( DEBUG );
-    $handle->do( "CREATE INDEX tb_audit_event_${table_suffix}_audit_field_idx ON tb_audit_event_${table_suffix}(audit_field)" );
-    $handle->do( "CREATE INDEX tb_audit_event_${table_suffix}_recorded_idx ON tb_audit_event_${table_suffix}(recorded)"       );
-    $handle->do( "CREATE INDEX tb_audit_event_${table_suffix}_txid_idx ON tb_audit_event_${table_suffix}(txid)"               );
+    $handle->do( "CREATE INDEX ${table_name}_audit_field_idx ON ${schema}.${table_name}(audit_field)" ) or die( "Failed to create audit_field index\n" );
+    $handle->do( "CREATE INDEX ${table_name}_recorded_idx    ON ${schema}.${table_name}(recorded)"    ) or die( "Failed to create recorded index\n"    );
+    $handle->do( "CREATE INDEX ${table_name}_txid_idx        ON ${schema}.${table_name}(txid)"        ) or die( "Failed to create txid index\n"        );
+
+    print "Fixing permissions...\n" if( DEBUG );
+    $handle->do( "GRANT INSERT                               ON ${schema}.${table_name} TO public" ) or die( "Failed to set INSERT perms\n" );
+    $handle->do( "GRANT SELECT (audit_transaction_type,txid) ON ${schema}.${table_name} TO public" ) or die( "Failed to set SELECT perms\n" );
+    $handle->do( "GRANT UPDATE (audit_transaction_type)      ON ${schema}.${table_name} TO public" ) or die( "Failed to set UPDATE perms\n" );
+
+    print "Moving to archive tablespace...\n" if( DEBUG );
+    $handle->do( "ALTER TABLE ${schema}.${table_name} SET TABLESPACE current_setting('${schema}.archive_tablespace')" ) or die( "Could not move table to archive tablespace" );
 }
 
 print "Successfully processed " . scalar @files . " files.\n";
