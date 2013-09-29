@@ -12,9 +12,15 @@ BEFORE RUNNING THIS SCRIPT:
    audit_log.user_table_uid_col = 'entity'
    audit_log.user_table_email_col = 'email_address'
    audit_log.user_table_username_col = 'username'
-   audit_log.archive_tablespace = 'pg_default'
+   audit_log.tablespace = 'pg_default'
    audit_log.enabled = 1
 */
+
+------------------------
+------ SETTINGS --------
+------------------------
+
+select set_config('custom_variable_classes', 'auditlog');
 
 ------------------------
 ------ FUNCTIONS ------
@@ -773,7 +779,7 @@ declare
     my_table_name   varchar;
     my_query        varchar;
 begin
-    if (select count(1) from @extschema@.tb_audit_event_current) = 0 then
+    if (select min(recorded) from @extschema@.tb_audit_event_current) is null then
         raise exception 'No events to rotate';
     end if;
 
@@ -789,8 +795,9 @@ begin
          || my_table_name;
 
     -- create new current table
-    create table @extschema@.tb_audit_event_current() 
-        inherits ( @extschema@.tb_audit_event );
+    execute 'create table @extschema@.tb_audit_event_current() '
+         || 'inherits ( @extschema@.tb_audit_event ) tablespace '
+         || current_setting('@extschema@.tablespace');
 
     alter extension auditlog
         add table @extschema@.tb_audit_event_current;
@@ -815,12 +822,15 @@ begin
             ||my_table_name||'_audit_field_idx';
 
     -- create indexes on new table
-    create index tb_audit_event_current_txid_idx
-        on @extschema@.tb_audit_event_current(txid);
-    create index tb_audit_event_current_recorded_idx
-        on @extschema@.tb_audit_event_current(recorded);
-    create index tb_audit_event_current_audit_field_idx
-        on @extschema@.tb_audit_event_current(audit_field);
+    execute 'create index tb_audit_event_current_txid_idx '
+         || 'on @extschema@.tb_audit_event_current(txid) tablespace '
+         || current_setting('@extschema@.tablespace');
+    execute 'create index tb_audit_event_current_recorded_idx '
+         || 'on @extschema@.tb_audit_event_current(recorded) tablespace '
+         || current_setting('@extschema@.tablespace');
+    execute 'create index tb_audit_event_current_audit_field_idx '
+         || 'on @extschema@.tb_audit_event_current(audit_field) tablespace '
+         || current_setting('@extschema@.tablespace');
 
     -- get mins & maxes for creating check constraints
     execute 'select max(recorded), min(recorded), '
@@ -835,10 +845,6 @@ begin
     execute 'alter table @extschema@.' || my_table_name
          || '  add check(txid between '''
          ||     my_min_txid || ''' and ''' || my_max_txid || ''')';
-
-    -- move table to appropriate tablespace
-    execute 'alter table @extschema@.' || my_table_name
-         || ' set tablespace ' || current_setting('@extschema@.archive_tablespace');
 end
  $_$
     language 'plpgsql';

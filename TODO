@@ -1,6 +1,10 @@
 Add support for logging schemas other than public
-Add correct handling of audit table space
+Move tables and indexes to audit tablespace upon rotation
 Add checking to ensure no logging of auditlog schema
 Package for pgxn
 Add checking for correct version of Postgres
-Script to archive and drop old tables
+Remove write perm from archived audit tables
+Create rotation script to avoid race condition 
+Correctly handle missing settings in postgresql.conf
+Branding
+Custom variable classes should use branded name, not schema name.

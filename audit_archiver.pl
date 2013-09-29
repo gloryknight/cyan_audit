@@ -6,7 +6,6 @@ $| = 1;
 
 use DBI;
 use Getopt::Std;
-use Data::Dumper;
 
 my %opts;
 
