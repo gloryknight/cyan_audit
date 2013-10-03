@@ -26,6 +26,8 @@ sub usage
         . "  -U user    Connect to database as given user\n"
         . "  -h host    Connect to database on given host\n"
         . "  -p port    Connect to database on given port\n"
+        . "  -a         Back up all audit log files\n"
+        . "  -c         Override all current audit log back up files\n"
         . "  -r         Remove table from database once it has been archived\n"
         . "  -z         gzip output file\n"
         . "  -o dir     Output directory (default current directory)\n";
@@ -34,7 +36,7 @@ sub usage
 }
 
 
-getopts('m:o:U:h:p:d:zr', \%opts) or usage();
+getopts('m:o:U:h:p:d:zrac', \%opts) or usage();
 
 my $months = $opts{'m'};
 
@@ -122,15 +124,19 @@ unless( $user_table and $user_table_email_col and $user_table_uid_col )
 }
 
 my $tables_q = "select c.relname, "
-             . "       pg_size_pretty(pg_total_relation_size(c.oid)) "
+             . "       pg_size_pretty(pg_total_relation_size(c.oid)), "
+             . "       c.relname < 'tb_audit_event_' "
+             . "       || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') "
              . "  from pg_class c "
              . "  join pg_namespace n "
              . "    on c.relnamespace = n.oid "
              . " where c.relkind = 'r' "
              . "   and n.nspname = '$schema' "
-             . "   and c.relname < 'tb_audit_event_' "
-             . "    || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') "
-             . "   and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$' "
+             unless( $opts{'a'} )
+             {
+                . "    || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') "
+                . "   and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$' "
+             }
              . " order by 1 ";
 
 my $table_rows = $handle->selectall_arrayref($tables_q)
@@ -138,7 +144,12 @@ my $table_rows = $handle->selectall_arrayref($tables_q)
 
 foreach my $table_row (@$table_rows)
 {
-    my ($table, $size) = @$table_row;
+    my ($table, $size, $remove) = @$table_row;
+    
+    if( glob( "$outdir/$file.*" ) and not $opts{'c'} )
+    {
+        next;
+    }
 
     my $exporting_msg = "Exporting $schema.$table ($size)";
 
@@ -220,7 +231,7 @@ foreach my $table_row (@$table_rows)
 
     print "Done!\n";
 
-    if( $opts{'r'} )
+    if( $opts{'r'} and $remove )
     {
         print "Dropping table $schema.$table... ";
         $handle->do("alter extension auditlog drop table $schema.$table");
