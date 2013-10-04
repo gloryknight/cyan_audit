@@ -8,3 +8,5 @@ Create rotation script to avoid race condition
 Correctly handle missing settings in postgresql.conf
 Branding
 Custom variable classes should use branded name, not schema name.
+Add DDL trigger if PG 9.3 or above
+Fix audit_event rollover problem
