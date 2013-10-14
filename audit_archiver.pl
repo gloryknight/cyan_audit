@@ -22,12 +22,12 @@ sub usage
 
     print "Usage: %0 -m months_to_keep [ options ... ]\n"
         . "Options:\n"
-        . "  -d db      Connect to database by given name\n"
-        . "  -U user    Connect to database as given user\n"
-        . "  -h host    Connect to database on given host\n"
-        . "  -p port    Connect to database on given port\n"
-        . "  -a         Back up all audit log files\n"
-        . "  -c         Override all current audit log back up files\n"
+        . "  -d db      Connect to database by given Name\n"
+        . "  -U user    Connect to database as given User\n"
+        . "  -h host    Connect to database on given Host\n"
+        . "  -p port    Connect to database on given Port\n"
+        . "  -a         Back up All audit tables\n"
+        . "  -c         Clobber (overwrite) existing back up files with same name\n"
         . "  -r         Remove table from database once it has been archived\n"
         . "  -z         gzip output file\n"
         . "  -o dir     Output directory (default current directory)\n";
