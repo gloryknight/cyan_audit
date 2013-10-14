@@ -27,7 +27,7 @@ sub usage
         . "  -h host    Connect to database on given Host\n"
         . "  -p port    Connect to database on given Port\n"
         . "  -a         Back up All audit tables\n"
-        . "  -c         Clobber (overwrite) existing back up files with same name\n"
+        . "  -c         Clobber (overwrite) existing files. Default is to skip these.\n"
         . "  -r         Remove table from database once it has been archived\n"
         . "  -z         gzip output file\n"
         . "  -o dir     Output directory (default current directory)\n";
