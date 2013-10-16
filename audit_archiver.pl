@@ -123,22 +123,22 @@ unless( $user_table and $user_table_email_col and $user_table_uid_col )
     die "Could not get auditlog settings for user table from postgresql.conf\n";
 }
 
-my $tables_q = "select c.relname, "
-             . "       pg_size_pretty(pg_total_relation_size(c.oid)), "
-             . "       c.relname < 'tb_audit_event_' "
-             . "       || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') "
-             . "  from pg_class c "
-             . "  join pg_namespace n "
-             . "    on c.relnamespace = n.oid "
-             . " where c.relkind = 'r' "
-             . "   and n.nspname = '$schema' "
-             unless( $opts{'a'} )
-             {
-                . "       c.relname < 'tb_audit_event_' "
-                . "    || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') "
-                . "   and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$' "
-             }
-             . " order by 1 ";
+my $tables_q  = "select c.relname, ";
+   $tables_q .= "       pg_size_pretty(pg_total_relation_size(c.oid)), ";
+   $tables_q .= "       c.relname < 'tb_audit_event_' ";
+   $tables_q .= "       || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') ";
+   $tables_q .= "  from pg_class c ";
+   $tables_q .= "  join pg_namespace n ";
+   $tables_q .= "    on c.relnamespace = n.oid ";
+   $tables_q .= " where c.relkind = 'r' ";
+   $tables_q .= "   and n.nspname = '$schema' ";
+   unless( $opts{'a'} )
+   {
+        $tables_q .= "   and c.relname < 'tb_audit_event_' ";
+        $tables_q .= "    || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') ";
+        $tables_q .= "   and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$' ";
+   }
+   $tables_q .= " order by 1 ";
 
 my $table_rows = $handle->selectall_arrayref($tables_q)
     or die "Could not get list of audit archive tables\n";
@@ -146,6 +146,7 @@ my $table_rows = $handle->selectall_arrayref($tables_q)
 foreach my $table_row (@$table_rows)
 {
     my ($table, $size, $remove) = @$table_row;
+    my $file = "$table.csv";
     
     if( glob( "$outdir/$file.*" ) and not $opts{'c'} )
     {
