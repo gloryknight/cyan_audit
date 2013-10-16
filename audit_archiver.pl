@@ -134,6 +134,7 @@ my $tables_q = "select c.relname, "
              . "   and n.nspname = '$schema' "
              unless( $opts{'a'} )
              {
+                . "       c.relname < 'tb_audit_event_' "
                 . "    || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') "
                 . "   and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$' "
              }
