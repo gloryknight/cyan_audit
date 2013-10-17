@@ -163,9 +163,15 @@ __EOF__
 
         if( $line_count == 1 )
         {
+            my $tablespace_q    = "SELECT current_setting('${schema}.archive_tablespace') AS tablespace";
+            my $tablespace_sth  = $handle->prepare( $tablespace_q );
+               $tablespace_sth->execute() or die( "Could not determin archive tablespace\n" );
+            my $tablespace_row  = $tablespace_sth->fetchrow_hashref();
+            my $tablespace      = $tablespace_row->{'tablespace'};
+            
             # Create table partition
             print "Creating restoration table...\n";
-            $handle->do( "CREATE TABLE $schema.tb_audit_event_restore ( ) INHERITS (tb_audit_event)" )
+            $handle->do( "CREATE TABLE $schema.tb_audit_event_restore ( ) INHERITS (tb_audit_event) TABLESPACE ${tablespace}" )
                 or die( "Could not create partition table to restore CSV contents" );
 
 #            $handle->do( "COPY tb_audit_event_restore FROM STDIN WITH DELIMITER ',' " )
@@ -292,9 +298,11 @@ __EOF__
     $handle->do( "GRANT UPDATE (audit_transaction_type)      ON ${schema}.${table_name} TO public" )
         or die( "Failed to set UPDATE perms\n" );
 
-    print "Moving to archive tablespace...\n" if( DEBUG );
-    $handle->do( "ALTER TABLE ${schema}.${table_name} SET TABLESPACE current_setting('${schema}.archive_tablespace')" )
-        or die( "Could not move table to archive tablespace" );
+    #move tablespaces
+
+    #print "Moving to archive tablespace...\n" if( DEBUG );
+    #$handle->do( "ALTER TABLE ${schema}.${table_name} SET TABLESPACE ${tablespace}" )
+    #    or die( "Could not move table to archive tablespace" );
 
     $handle->do( "COMMIT" ) or die( "Could not commit restore operation\n" );
 }
