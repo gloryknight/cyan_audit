@@ -84,6 +84,13 @@ my $table_sth   = $handle->prepare( $table_q );
 
 die( "tb_audit_event_current does not exist!" ) if( $table_sth->rows() < 1 );
 
+my $get_audit_data_type_q = <<__EOF__;
+    SELECT $schema.fn_get_or_create_audit_data_type(
+               ?
+           ) AS audit_data_type
+__EOF__
+my $get_audit_data_type_sth = $handle->prepare( $get_audit_data_type_q );
+
 my $get_audit_field_q   = <<__EOF__;
     SELECT $schema.fn_get_or_create_audit_field(
                ?,
@@ -156,6 +163,10 @@ foreach my $file( @files )
                     )
 __EOF__
     my $audit_event_sth = $handle->prepare( $audit_event_insert_q );
+    
+    my $update_audit_field_q = "UPDATE $schema.tb_audit_field SET audit_data_type = ? WHERE audit_field = ?";
+    my $update_audit_field_sth = $handle->prepare( $update_audit_field_q );
+    my $header_hash     = { };
 
     while( my $line = $csv->getline( $fh ) )
     {
@@ -169,29 +180,46 @@ __EOF__
             my $tablespace_row  = $tablespace_sth->fetchrow_hashref();
             my $tablespace      = $tablespace_row->{'tablespace'};
             
+            # Header determination logic
+            my $count = 0;
+            
+            foreach my $header( @$line )
+            {
+                $header_hash->{$header} = $count;
+                $count++;
+            }
+            
             # Create table partition
             print "Creating restoration table...\n";
             $handle->do( "CREATE TABLE $schema.tb_audit_event_restore ( ) INHERITS (tb_audit_event) TABLESPACE ${tablespace}" )
                 or die( "Could not create partition table to restore CSV contents" );
-
-#            $handle->do( "COPY tb_audit_event_restore FROM STDIN WITH DELIMITER ',' " )
-#                or die( "Could not initiate COPY command to tb_audit_event_restore" );
         }
         else
         {
-            my $audit_event = $line->[0 ];
-            my $txid        = $line->[1 ];
-            my $recorded    = $line->[2 ];
-            my $uid         = $line->[3 ];
-            my $email       = $line->[4 ];
-            my $table_name  = $line->[5 ];
-            my $column      = $line->[6 ];
-            my $row_pk_val  = $line->[7 ];
-            my $row_op      = $line->[8 ];
-            my $pid         = $line->[9 ];
-            my $description = $line->[10];
-            my $old_value   = $line->[11];
-            my $new_value   = $line->[12];
+            my $audit_event = $line->[$header_hash->{'audit_event'  }];
+            my $txid        = $line->[$header_hash->{'txid'         }];
+            my $recorded    = $line->[$header_hash->{'recorded'     }];
+            my $uid         = $line->[$header_hash->{'uid'          }];
+            my $email       = $line->[$header_hash->{'email_address'}];
+            my $table_name  = $line->[$header_hash->{'table_name'   }];
+            my $column      = $line->[$header_hash->{'column_name'  }];
+            my $row_pk_val  = $line->[$header_hash->{'row_pk_val'   }];
+            my $row_op      = $line->[$header_hash->{'row_op'       }];
+            my $pid         = $line->[$header_hash->{'pid'          }];
+            my $description = $line->[$header_hash->{'description'  }];
+            my $old_value   = $line->[$header_hash->{'old_value'    }];
+            my $new_value   = $line->[$header_hash->{'new_value'    }];
+            my $data_type   = $line->[$header_hash->{'data_type'    }] if( defined $header_hash->{'data_type'} );
+
+            my $audit_data_type;
+
+            if( $data_type )
+            {
+                $get_audit_data_type_sth->bind_param( 1, $data_type );
+                $get_audit_data_type_sth->execute() or die( "Could not determine audit_data_type for $data_type\n" );
+                my $audit_data_type_row = $get_audit_data_type_sth->fetchrow_hashref();
+                $audit_data_type = $audit_data_type_row->{'audit_data_type'};
+            }    
             
             $get_audit_field_sth->bind_param( 1, $table_name );
             $get_audit_field_sth->bind_param( 2, $column     );
@@ -205,6 +233,15 @@ __EOF__
             my $audit_field             = $audit_field_row->{'audit_field'};
             my $audit_transaction_type  = $audit_transaction_type_row->{'audit_transaction_type'};
             
+            if( $audit_data_type )
+            {
+                # Update audit_field row to the audit_data_type
+                $update_audit_field_sth->bind_param( 1, $audit_data_type );
+                $update_audit_field_sth->bind_param( 2, $audit_field     );
+                $update_audit_field_sth->execute()
+                    or die( "Could not update audit_field $audit_field to have audit_data_type $audit_data_type\n" );
+            }
+
             $audit_event_sth->bind_param( 1,  $audit_event              );
             $audit_event_sth->bind_param( 2,  $audit_field              );
             $audit_event_sth->bind_param( 3,  $row_pk_val               );
@@ -217,8 +254,6 @@ __EOF__
             $audit_event_sth->bind_param( 10, $old_value                );
             $audit_event_sth->bind_param( 11, $new_value                );
             $audit_event_sth->execute() or die( "Could not insert row\n" );
-#            my $row = "$audit_event,$audit_field,$row_pk_val,$recorded,$uid,$row_op,$txid,$pid,$audit_transaction_type,$old_value,$new_value";
-#            $handle->pg_putcopydata( $row ) or die( "Could not restore row $line_count of file $file into table partition\n" ); 
         }
     }
 
