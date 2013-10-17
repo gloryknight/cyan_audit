@@ -7,6 +7,7 @@ use warnings;
 
 use DBI;
 use Getopt::Std;
+use Text::CSV_XS;
 use Data::Dumper;
 
 use constant DEBUG => 1;
@@ -69,7 +70,7 @@ my $schema     = $schema_row->{'schema_name'};
 print "Found audit log extension installed to schema '$schema'\n";
 
 my $table_q = <<__EOF__;
-    SELECT c.relname,
+    SELECT c.relname
       FROM pg_class c
 INNER JOIN pg_namespace n
         ON c.relnamespace = n.oid
@@ -106,6 +107,7 @@ foreach my $file( @files )
     my $fh;
     print "Opening backup file...\n" if( DEBUG );
 
+    $handle->do( "BEGIN" );
     if( $file =~ /\.gz$/i )
     {
         open( $fh, "gunzip -c $file |" ) or die( "Could not open $file:\n$!\n" );
@@ -122,36 +124,68 @@ foreach my $file( @files )
     my $line_count = 0;
     print "Restoring table contents...\n" if( DEBUG );
 
-    while( my $line = <$fh> )
+    my $csv = Text::CSV_XS->new( { binary => 1, eol => "\n" } );
+    my $audit_event_insert_q = <<__EOF__;
+        INSERT INTO $schema.tb_audit_event_restore
+                    (
+                        audit_event,
+                        audit_field,
+                        row_pk_val,
+                        recorded,
+                        uid,
+                        row_op,
+                        txid,
+                        pid,
+                        audit_transaction_type,
+                        old_value,
+                        new_value
+                    )
+             VALUES
+                    (
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?
+                    )
+__EOF__
+    my $audit_event_sth = $handle->prepare( $audit_event_insert_q );
+
+    while( my $line = $csv->getline( $fh ) )
     {
         $line_count++;
 
         if( $line_count == 1 )
         {
             # Create table partition
-            $handle->do( "CREATE TABLE tb_audit_event_restore ( ) INHERITS (tb_audit_event)" )
+            print "Creating restoration table...\n";
+            $handle->do( "CREATE TABLE $schema.tb_audit_event_restore ( ) INHERITS (tb_audit_event)" )
                 or die( "Could not create partition table to restore CSV contents" );
 
-            $handle->do( "COPY tb_audit_event_restore FROM STDIN WITH DELIMITER ',' " )
-                or die( "Could not initiate COPY command to tb_audit_event_restore" );
+#            $handle->do( "COPY tb_audit_event_restore FROM STDIN WITH DELIMITER ',' " )
+#                or die( "Could not initiate COPY command to tb_audit_event_restore" );
         }
         else
         {
-            my $cols = \split( ',', $line );
-
-            my $audit_event = $cols->[0 ];
-            my $txid        = $cols->[1 ];
-            my $recorded    = $cols->[2 ];
-            my $uid         = $cols->[3 ];
-            my $email       = $cols->[4 ];
-            my $table_name  = $cols->[5 ];
-            my $column      = $cols->[6 ];
-            my $row_pk_val  = $cols->[7 ];
-            my $row_op      = $cols->[8 ];
-            my $pid         = $cols->[9 ];
-            my $description = $cols->[10];
-            my $old_value   = $cols->[11];
-            my $new_value   = $cols->[12];
+            my $audit_event = $line->[0 ];
+            my $txid        = $line->[1 ];
+            my $recorded    = $line->[2 ];
+            my $uid         = $line->[3 ];
+            my $email       = $line->[4 ];
+            my $table_name  = $line->[5 ];
+            my $column      = $line->[6 ];
+            my $row_pk_val  = $line->[7 ];
+            my $row_op      = $line->[8 ];
+            my $pid         = $line->[9 ];
+            my $description = $line->[10];
+            my $old_value   = $line->[11];
+            my $new_value   = $line->[12];
             
             $get_audit_field_sth->bind_param( 1, $table_name );
             $get_audit_field_sth->bind_param( 2, $column     );
@@ -164,13 +198,25 @@ foreach my $file( @files )
 
             my $audit_field             = $audit_field_row->{'audit_field'};
             my $audit_transaction_type  = $audit_transaction_type_row->{'audit_transaction_type'};
-
-            my $row = "$audit_event,$audit_field,$row_pk_val,$recorded,$uid,$row_op,$txid,$pid,$audit_transaction_type,$old_value,$new_value";
-            $handle->pg_putcopydata( $row ) or die( "Could not restore row $line_count of file $file into table partition\n" ); 
+            
+            $audit_event_sth->bind_param( 1,  $audit_event              );
+            $audit_event_sth->bind_param( 2,  $audit_field              );
+            $audit_event_sth->bind_param( 3,  $row_pk_val               );
+            $audit_event_sth->bind_param( 4,  $recorded                 );
+            $audit_event_sth->bind_param( 5,  $uid                      );
+            $audit_event_sth->bind_param( 6,  $row_op                   );
+            $audit_event_sth->bind_param( 7,  $txid                     );
+            $audit_event_sth->bind_param( 8,  $pid                      );
+            $audit_event_sth->bind_param( 9,  $audit_transaction_type   );
+            $audit_event_sth->bind_param( 10, $old_value                );
+            $audit_event_sth->bind_param( 11, $new_value                );
+            $audit_event_sth->execute() or die( "Could not insert row\n" );
+#            my $row = "$audit_event,$audit_field,$row_pk_val,$recorded,$uid,$row_op,$txid,$pid,$audit_transaction_type,$old_value,$new_value";
+#            $handle->pg_putcopydata( $row ) or die( "Could not restore row $line_count of file $file into table partition\n" ); 
         }
     }
 
-    $handle->pg_putcopyend() or die( "Error finalizing restore\n" );
+    #$handle->pg_putcopyend() or die( "Error finalizing restore\n" );
     close( $fh ) or die( "Could not close '$file':\n$!\n" );
     print "Done, restored " . ( $line_count - 1 ) . " rows.\n" if( DEBUG );
 
@@ -183,19 +229,19 @@ WITH tt_recorded AS
            min( recorded ) AS min_recorded,
            max( txid     ) AS max_txid,
            min( txid     ) AS min_txid
-      FROM tb_audit_event_current
+      FROM $schema.tb_audit_event_restore
 )
-    SELECT EXTRACT( year   FROM tt.max_recorded )
-        || EXTRACT( month  FROM tt.max_recorded )
-        || EXTRACT( day    FROM tt.max_recorded )
+    SELECT EXTRACT( year   FROM tt.max_recorded )::VARCHAR
+        || EXTRACT( month  FROM tt.max_recorded )::VARCHAR
+        || EXTRACT( day    FROM tt.max_recorded )::VARCHAR
         || '_'
-        || EXTRACT( hour   FROM tt.max_recorded )
-        || EXTRACT( minute FROM tt.max_recorded ) AS suffix,
+        || EXTRACT( hour   FROM tt.max_recorded )::VARCHAR
+        || EXTRACT( minute FROM tt.max_recorded )::VARCHAR AS suffix,
         tt.max_recorded,
         tt.min_recorded,
         tt.max_txid,
         tt.min_txid
-      FROM tt_recorded tt
+   FROM tt_recorded tt
 __EOF__
     
     my $max_recorded_sth = $handle->prepare( $max_recorded_q );
@@ -215,17 +261,19 @@ __EOF__
 
     my $constraint_q = '';
     print "Adding constraints...\n" if( DEBUG );
+    
     $constraint_q = <<__EOF__;
     ALTER TABLE ${schema}.${table_name}
-        ADD tb_audit_event_${table_suffix}_recorded_check
-        CHECK ( recorded >= ${min_rec}::TIMESTAMP AND recorded <= ${max_rec}::TIMESTAMP )
+        ADD CONSTRAINT ${table_name}_recorded_check CHECK( recorded >= '${min_rec}'::TIMESTAMP AND recorded <= '${max_rec}'::TIMESTAMP )
 __EOF__
+    
     $handle->do( $constraint_q ) or die( "Could not add recorded constraint to table partition\n" );
+
     $constraint_q = <<__EOF__;
     ALTER TABLE ${schema}.${table_name}
-        ADD tb_audit_event_${table_suffix}_txid_check
-        CHECK ( txid >= ${min_txid}::BIGINT AND txid <= ${max_txid}::BIGINT )
+        ADD CONSTRAINT ${table_name}_txid_check CHECK( txid >= ${min_txid}::BIGINT AND txid <= ${max_txid}::BIGINT )
 __EOF__
+    
     $handle->do( $constraint_q ) or die( "Could not add txid constraint to table partition\n" );
     
     print "Generating indexes...\n" if( DEBUG );
@@ -247,6 +295,8 @@ __EOF__
     print "Moving to archive tablespace...\n" if( DEBUG );
     $handle->do( "ALTER TABLE ${schema}.${table_name} SET TABLESPACE current_setting('${schema}.archive_tablespace')" )
         or die( "Could not move table to archive tablespace" );
+
+    $handle->do( "COMMIT" ) or die( "Could not commit restore operation\n" );
 }
 
 print "Successfully processed " . scalar @files . " files.\n";
