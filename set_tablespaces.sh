@@ -17,7 +17,8 @@ select case when c.relkind = 'r'
   where n.nspname = 'auditlog'
     and c.reltablespace = 0
     and c.relname ~ 'tb_audit_event_\d{8}'
-    and c.relkind in ('r','i');" | 
+    and c.relkind in ('r','i')
+  order by c.relname;" | 
 while read relation; do
     echo "Moving $relation..."
     psql -c "alter $relation set tablespace audit_log;" || break
