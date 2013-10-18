@@ -272,12 +272,12 @@ WITH tt_recorded AS
            min( txid     ) AS min_txid
       FROM $schema.tb_audit_event_restore
 )
-    SELECT EXTRACT( year   FROM tt.max_recorded )::VARCHAR
-        || EXTRACT( month  FROM tt.max_recorded )::VARCHAR
-        || EXTRACT( day    FROM tt.max_recorded )::VARCHAR
+    SELECT to_char( EXTRACT( year   FROM tt.max_recorded ), 'FM0000' )
+        || to_char( EXTRACT( month  FROM tt.max_recorded ), 'FM00'   )
+        || to_char( EXTRACT( day    FROM tt.max_recorded ), 'FM00'   )
         || '_'
-        || EXTRACT( hour   FROM tt.max_recorded )::VARCHAR
-        || EXTRACT( minute FROM tt.max_recorded )::VARCHAR AS suffix,
+        || to_char( EXTRACT( hour   FROM tt.max_recorded ), 'FM00'   )
+        || to_char( EXTRACT( minute FROM tt.max_recorded ), 'FM00'   ) AS suffix,
         tt.max_recorded,
         tt.min_recorded,
         tt.max_txid,
@@ -332,12 +332,6 @@ __EOF__
         or die( "Failed to set SELECT perms\n" );
     $handle->do( "GRANT UPDATE (audit_transaction_type)      ON ${schema}.${table_name} TO public" )
         or die( "Failed to set UPDATE perms\n" );
-
-    #move tablespaces
-
-    #print "Moving to archive tablespace...\n" if( DEBUG );
-    #$handle->do( "ALTER TABLE ${schema}.${table_name} SET TABLESPACE ${tablespace}" )
-    #    or die( "Could not move table to archive tablespace" );
 
     $handle->do( "COMMIT" ) or die( "Could not commit restore operation\n" );
 }
