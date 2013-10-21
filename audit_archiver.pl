@@ -132,11 +132,11 @@ my $tables_q  = "select c.relname, ";
    $tables_q .= "    on c.relnamespace = n.oid ";
    $tables_q .= " where c.relkind = 'r' ";
    $tables_q .= "   and n.nspname = '$schema' ";
+   $tables_q .= "   and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$' ";
    unless( $opts{'a'} )
    {
         $tables_q .= "   and c.relname < 'tb_audit_event_' ";
-        $tables_q .= "    || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') ";
-        $tables_q .= "   and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$' ";
+        $tables_q .= "       || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') ";
    }
    $tables_q .= " order by 1 ";
 
@@ -241,5 +241,3 @@ foreach my $table_row (@$table_rows)
         print "Done\n";
     }
 }
-
-
