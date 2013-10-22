@@ -18,18 +18,18 @@ sub usage($)
 
     print "$msg\n" if( $msg );
     print "Usage:\n";
-    print " $0 -f file1,file2,file3,... -U dbuser -d dbname -h dbhost [-p dbport]\n";
+    print " $0 -i input_dir -U dbuser -d dbname -h dbhost [-p dbport]\n";
     exit 1; 
 }
 
-our( $opt_f, $opt_U, $opt_d, $opt_h, $opt_p );
-&usage( "Invalid arguments" ) unless( getopts( 'f:U:d:h:p:' ) );
+our( $opt_i, $opt_U, $opt_d, $opt_h, $opt_p );
+&usage( "Invalid arguments" ) unless( getopts( 'i:U:d:h:p:' ) );
 
 my $port    = $opt_p;
 my $user    = $opt_U;
 my $host    = $opt_h;
 my $dbname  = $opt_d;
-my $files   = $opt_f;
+my $dir     = $opt_i;
 
 
 $port = 5432 unless( $port and length( $port ) > 0 and $port =~ /^\d+$/ and $port < 65536 );
@@ -37,14 +37,19 @@ $port = 5432 unless( $port and length( $port ) > 0 and $port =~ /^\d+$/ and $por
 &usage( "Invalid username provided" ) unless( $user   and length( $user   ) > 0 );
 &usage( "Invalid hostname provided" ) unless( $host   and length( $host   ) > 0 );
 &usage( "Invalid dbname provided"   ) unless( $dbname and length( $dbname ) > 0 );
-&usage( "Invalid files provided"    ) unless( $files  and length( $files  ) > 0 );
-my @files   = split( ',', $files );
+&usage( "Invalid files provided"    ) unless( $dir    and length( $dir    ) > 0 and -d $dir );
 
-foreach my $file( @files )
+opendir( DIR, $dir ) or die( "Could not open directory '$dir':\n$!\n" );
+my @files;
+
+while( my $file = readdir( DIR ) )
 {
     &usage( "Invalid filename provided" ) unless( length( $file ) > 0 );
     &usage( "Files $file does not exist or cannot be read!" ) unless( -f $file and -r $file );
+    push( @files, $file );
 }
+
+closedir( DIR );
 
 my $connection_string = "dbname=${dbname};host=${host};port=${port}";
 
