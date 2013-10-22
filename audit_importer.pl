@@ -272,17 +272,12 @@ WITH tt_recorded AS
            min( txid     ) AS min_txid
       FROM $schema.tb_audit_event_restore
 )
-    SELECT to_char( EXTRACT( year   FROM tt.max_recorded ), 'FM0000' )
-        || to_char( EXTRACT( month  FROM tt.max_recorded ), 'FM00'   )
-        || to_char( EXTRACT( day    FROM tt.max_recorded ), 'FM00'   )
-        || '_'
-        || to_char( EXTRACT( hour   FROM tt.max_recorded ), 'FM00'   )
-        || to_char( EXTRACT( minute FROM tt.max_recorded ), 'FM00'   ) AS suffix,
-        tt.max_recorded,
-        tt.min_recorded,
-        tt.max_txid,
-        tt.min_txid
-   FROM tt_recorded tt
+    SELECT to_char( tt.max_recorded, 'YYYYMMDD_HH24MI' ) AS suffix,
+           tt.max_recorded,
+           tt.min_recorded,
+           tt.max_txid,
+           tt.min_txid
+      FROM tt_recorded tt
 __EOF__
     
     my $max_recorded_sth = $handle->prepare( $max_recorded_q );
