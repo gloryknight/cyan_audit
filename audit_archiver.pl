@@ -126,7 +126,7 @@ unless( $user_table and $user_table_email_col and $user_table_uid_col )
 my $tables_q  = "select c.relname, ";
    $tables_q .= "       pg_size_pretty(pg_total_relation_size(c.oid)), ";
    $tables_q .= "       c.relname < 'tb_audit_event_' ";
-   $tables_q .= "       || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') ";
+   $tables_q .= "       || to_char(now() - interval '$months months', 'YYYYMMDD_HH24MI') ";
    $tables_q .= "  from pg_class c ";
    $tables_q .= "  join pg_namespace n ";
    $tables_q .= "    on c.relnamespace = n.oid ";
@@ -136,7 +136,7 @@ my $tables_q  = "select c.relname, ";
    unless( $opts{'a'} )
    {
         $tables_q .= "   and c.relname < 'tb_audit_event_' ";
-        $tables_q .= "       || to_char(now() - interval '$months months', 'YYYYMMDD_HHMI') ";
+        $tables_q .= "       || to_char(now() - interval '$months months', 'YYYYMMDD_HH24MI') ";
    }
    $tables_q .= " order by 1 ";
 
