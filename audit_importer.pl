@@ -44,6 +44,7 @@ my @files;
 
 while( my $file = readdir( DIR ) )
 {
+    next if( $file =~ m/^\./ );
     $file = "$dir/$file";
     &usage( "Invalid filename provided" ) unless( length( $file ) > 0 );
     &usage( "Files $file does not exist or cannot be read!" ) unless( -f $file and -r $file );
