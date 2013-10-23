@@ -264,7 +264,6 @@ __EOF__
         }
     }
 
-    #$handle->pg_putcopyend() or die( "Error finalizing restore\n" );
     close( $fh ) or die( "Could not close '$file':\n$!\n" );
     print "Done, restored " . ( $line_count - 1 ) . " rows.\n" if( DEBUG );
 
@@ -298,7 +297,9 @@ __EOF__
     my $min_txid     = $max_recorded_row->{'min_txid'    };
     my $table_name   = "tb_audit_event_$table_suffix";
     
-    print "Renaming table...\n" if( DEBUG ); 
+    print "Renaming table...\n" if( DEBUG );
+    
+    $handle->do( "DROP TABLE IF EXISTS ${schema}.${table_name}" );
     $handle->do( "ALTER TABLE ${schema}.tb_audit_event_restore RENAME TO $table_name" )
          or die( "Could not rename tb_audit_event_restore to $table_name\n" );
 
