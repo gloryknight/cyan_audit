@@ -9,6 +9,7 @@ use DBI;
 use Getopt::Std;
 use Text::CSV_XS;
 use Data::Dumper;
+use Time::HiRes qw(gettimeofday);
 
 use constant DEBUG => 1;
 
@@ -20,6 +21,31 @@ sub usage($)
     print "Usage:\n";
     print " $0 -i input_dir -U dbuser -d dbname -h dbhost [-p dbport]\n";
     exit 1; 
+}
+
+sub microtime
+{
+    ( my $time_s, my $time_us ) = gettimeofday;
+
+    my $float = 0;
+       $float = shift if(@_);
+    my $microtime;
+
+    if( $float )
+    {
+        while( length("$time_us") < 6 )
+        {
+            $time_us = "0$time_us";
+        }
+
+        $microtime = "$time_s.$time_us";
+    }
+    else
+    {
+        $microtime = "$time_s $time_us";
+    }
+
+    return $microtime;
 }
 
 our( $opt_i, $opt_U, $opt_d, $opt_h, $opt_p );
@@ -117,9 +143,10 @@ my $get_audit_transaction_type_sth = $handle->prepare( $get_audit_transaction_ty
 
 foreach my $file( @files )
 {
+    my $start_time = microtime(1);
     # Check if gzip, we'll need a CSV
     my $fh;
-    print "Opening backup file...\n" if( DEBUG );
+    print "Opening backup file '$file'...\n" if( DEBUG );
 
     $handle->do( "BEGIN" );
     if( $file =~ /\.gz$/i )
@@ -337,6 +364,9 @@ __EOF__
         or die( "Failed to set UPDATE perms\n" );
 
     $handle->do( "COMMIT" ) or die( "Could not commit restore operation\n" );
+    my $end_time = microtime(1);
+    my $delta    = ( $end_time - $start_time ) / 3600;
+    print "Processed '$file' in $delta hours\n";
 }
 
 print "Successfully processed " . scalar @files . " files.\n";
