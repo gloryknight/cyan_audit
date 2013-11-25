@@ -134,6 +134,9 @@ $q = "grant update (audit_transaction_type) "
    . " on $schema.tb_audit_event_current to public ";
 $handle->do($q) or die "Could not grant audit event table permissions\n";
 
+$q = "revoke all privileges on $schema.$table_name from public"
+$handle->do($q) or die "Could not revoke public access to old audit table\n";
+
 print "Done.\n";
 
 
