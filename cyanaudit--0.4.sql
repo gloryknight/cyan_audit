@@ -457,8 +457,9 @@ end
 -- fn_get_or_create_audit_field
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_field
 (
-    in_table_name   varchar,
-    in_column_name  varchar
+    in_table_name       varchar,
+    in_column_name      varchar,
+    in_audit_data_type  integer default null
 )
 returns integer as
  $_$
@@ -491,6 +492,7 @@ begin
                 my_active = false;
             end if;
         else
+            -- TODO: If field does not exist in DB, set active = false
             my_active = true;
         end if;
           
@@ -498,13 +500,15 @@ begin
         (
             table_name,
             column_name,
-            active
+            active,
+            audit_data_type
         )
         values
         (
             in_table_name, 
             in_column_name,
-            my_active
+            my_active,
+            in_audit_data_type
         )
         returning audit_field
         into my_audit_field;
@@ -843,6 +847,8 @@ alter sequence @extschema@.sq_pk_audit_data_type
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_data_type','');
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_data_type','');
 
+insert into tb_audit_data_type values (0, '[unknown]');
+
 -- tb_audit_field
 create sequence @extschema@.sq_pk_audit_field;
 
@@ -864,6 +870,8 @@ alter sequence @extschema@.sq_pk_audit_field
 
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_field','');
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_field','');
+
+insert into tb_audit_field values (0, '[unknown]','[unknown]', 0, 0, false);
 
 
 -- tb_audit_transaction_type
@@ -1032,7 +1040,6 @@ returns trigger as
  $_$
 declare
     my_pk_col           varchar;
-    my_audit_data_type  integer;
 begin
     if TG_OP = 'UPDATE' then
         if NEW.table_name  != OLD.table_name or
@@ -1042,30 +1049,34 @@ begin
         end if;
     end if;
 
-    if NEW.active = false then
-        return NEW;
-    end if;
+    NEW.audit_data_type := coalesce(
+        NEW.audit_data_type,
+        @extschema@.fn_get_or_create_audit_data_type(
+            @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
+        ),
+        0
+    );
 
-    if( NEW.table_pk is null ) then
+    if NEW.table_pk is null then
         my_pk_col := @extschema@.fn_get_table_pk_col(NEW.table_name);
 
         if my_pk_col is null then
-            raise exception 'Cannot audit table %: No PK column found',
-                NEW.table_name;
-        end if;
-
-        if my_pk_col = NEW.column_name then
-            NEW.table_pk := NEW.audit_field;
+            NEW.table_pk := 0;
         else
-            select @extschema@.fn_get_or_create_audit_field(NEW.table_name, my_pk_col)
-              into NEW.table_pk;
+            if my_pk_col = NEW.column_name then
+                NEW.table_pk := NEW.audit_field;
+            else
+                NEW.table_pk := @extschema@.fn_get_or_create_audit_field (
+                                    NEW.table_name, 
+                                    my_pk_col
+                                );
+            end if;
         end if;
     end if;
-
-    if NEW.audit_data_type is null then
-        NEW.audit_data_type := @extschema@.fn_get_or_create_audit_data_type(
-            @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
-        );
+        
+    if NEW.active and NEW.table_pk = 0 then
+        raise exception 'Cannot audit table %: No PK column found',
+            NEW.table_name;
     end if;
 
     return NEW;
