@@ -1,14 +1,10 @@
 Add support for logging schemas other than public
-Move tables and indexes to audit tablespace upon rotation
 Add checking to ensure no logging of auditlog schema
 Package for pgxn
 Add checking for correct version of Postgres
-Remove write perm from archived audit tables
-Create rotation script to avoid race condition 
 Correctly handle missing settings in postgresql.conf
 Branding
 Custom variable classes should use branded name, not schema name.
 Add DDL trigger if PG 9.3 or above
-Fix audit_event rollover problem
 Add audit_data_type optional param to fn_get_or_create_audit_field()
 Check existence of column before setting active in fn_get_or_create_audit_field()

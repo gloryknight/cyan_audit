@@ -17,72 +17,48 @@ sub usage($)
 {
     my( $msg ) = @_;
 
-    print "$msg\n" if( $msg );
-    print "Usage:\n";
-    print " $0 -i input_dir -U dbuser -d dbname -h dbhost [-p dbport]\n";
-    exit 1; 
+    print "Error: $msg\n" if( $msg );
+    print <<__EOF__;
+Usage:
+    $0 [ options ] file [...]
+Options:
+    -U dbuser
+    -d dbname
+    -h dbhost
+    -p dbport
+__EOF__
+
+    exit 1;
 }
 
-sub microtime
+sub microtime()
 {
-    ( my $time_s, my $time_us ) = gettimeofday;
-
-    my $float = 0;
-       $float = shift if(@_);
-    my $microtime;
-
-    if( $float )
-    {
-        while( length("$time_us") < 6 )
-        {
-            $time_us = "0$time_us";
-        }
-
-        $microtime = "$time_s.$time_us";
-    }
-    else
-    {
-        $microtime = "$time_s $time_us";
-    }
-
-    return $microtime;
+    return sprintf '%d.%0.6d', gettimeofday();
 }
 
-our( $opt_i, $opt_U, $opt_d, $opt_h, $opt_p );
-&usage( "Invalid arguments" ) unless( getopts( 'i:U:d:h:p:' ) );
+our( $opt_U, $opt_d, $opt_h, $opt_p );
+&usage( "Invalid arguments" ) unless( getopts( 'U:d:h:p:' ) );
 
 my $port    = $opt_p;
 my $user    = $opt_U;
 my $host    = $opt_h;
 my $dbname  = $opt_d;
-my $dir     = $opt_i;
 
-
-$port = 5432 unless( $port and length( $port ) > 0 and $port =~ /^\d+$/ and $port < 65536 );
-
-&usage( "Invalid username provided" ) unless( $user   and length( $user   ) > 0 );
-&usage( "Invalid hostname provided" ) unless( $host   and length( $host   ) > 0 );
-&usage( "Invalid dbname provided"   ) unless( $dbname and length( $dbname ) > 0 );
-&usage( "Invalid files provided"    ) unless( $dir    and length( $dir    ) > 0 and -d $dir );
-
-opendir( DIR, $dir ) or die( "Could not open directory '$dir':\n$!\n" );
-my @files;
-
-while( my $file = readdir( DIR ) )
+foreach my $file (@ARGV)
 {
-    next if( $file =~ m/^\./ );
-    $file = "$dir/$file";
-    &usage( "Invalid filename provided" ) unless( length( $file ) > 0 );
-    &usage( "Files $file does not exist or cannot be read!" ) unless( -f $file and -r $file );
-    push( @files, $file );
+    ( -f $file and -r $file and -s $file )
+        or &usage( "File '$file' is either invalid, unreadable or 0 bytes." );
 }
 
-closedir( DIR );
+my $connection_string = "dbi:Pg:"
+                      . ($opt_d ? "dbname=$opt_d;" : "")
+                      . ($opt_h ? "host=$opt_h;"   : "")
+                      . ($opt_p ? "port=$opt_p;"   : "");
 
-my $connection_string = "dbname=${dbname};host=${host};port=${port}";
+$connection_string =~ s/;$//;
 
-my $handle = DBI->connect("dbi:Pg:$connection_string", $user, '' )
-                 or die( "Couldn't connect to database name, check connection params and .pgpass file" );
+my $handle = DBI->connect($connection_string, $user, '' )
+    or die "Couldn't connect to database: $DBI::errstr\n";
 
 my $schema_q = <<__EOF__;
     SELECT n.nspname AS schema_name
@@ -112,187 +88,183 @@ INNER JOIN pg_namespace n
        AND c.relname = 'tb_audit_event_current';
 __EOF__
 
-my $table_sth   = $handle->prepare( $table_q );
-   $table_sth->execute() or die( "Could not run check query for tb_audit_event_current\n" );
+$handle->selectrow_array( $table_q )
+   or die "Could not find tb_audit_event_current table\n";
 
-die( "tb_audit_event_current does not exist!" ) if( $table_sth->rows() < 1 );
+my $audit_data_type_q = "SELECT $schema.fn_get_or_create_audit_data_type( ? )";
+my $audit_data_type_sth = $handle->prepare( $audit_data_type_q );
 
-my $get_audit_data_type_q = <<__EOF__;
-    SELECT $schema.fn_get_or_create_audit_data_type(
-               ?
-           ) AS audit_data_type
+my $audit_field_q   = "SELECT $schema.fn_get_or_create_audit_field(?, ?)";
+my $audit_field_sth = $handle->prepare( $audit_field_q );
+
+my $audit_transaction_type_q = "SELECT $schema.fn_get_or_create_audit_transaction_type(?)";
+my $audit_transaction_type_sth = $handle->prepare( $audit_transaction_type_q );
+
+my $audit_event_insert_q = <<__EOF__;
+    INSERT INTO $schema.tb_audit_event_restore
+                (
+                    audit_event,
+                    audit_field,
+                    row_pk_val,
+                    recorded,
+                    uid,
+                    row_op,
+                    txid,
+                    pid,
+                    audit_transaction_type,
+                    old_value,
+                    new_value
+                )
+         VALUES
+                (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
 __EOF__
-my $get_audit_data_type_sth = $handle->prepare( $get_audit_data_type_q );
 
-my $get_audit_field_q   = <<__EOF__;
-    SELECT $schema.fn_get_or_create_audit_field(
-               ?,
-               ?
-           ) AS audit_field
+my $audit_event_sth = $handle->prepare( $audit_event_insert_q );
+
+my $update_audit_field_q = <<__EOF__;
+    UPDATE $schema.tb_audit_field 
+       SET audit_data_type = ? 
+     WHERE audit_field = ?
 __EOF__
 
-my $get_audit_field_sth = $handle->prepare( $get_audit_field_q );
+my $update_audit_field_sth = $handle->prepare( $update_audit_field_q );
 
-my $get_audit_transaction_type_q = <<__EOF__;
-    SELECT $schema.fn_get_or_create_audit_transaction_type(
-               ?
-           ) AS audit_transaction_type
-__EOF__
+my %audit_data_types;
 
-my $get_audit_transaction_type_sth = $handle->prepare( $get_audit_transaction_type_q );
-
-foreach my $file( @files )
+foreach my $file( @ARGV )
 {
-    my $start_time = microtime(1);
+    my $start_time = microtime();
     # Check if gzip, we'll need a CSV
     my $fh;
-    print "Opening backup file '$file'...\n" if( DEBUG );
 
-    $handle->do( "BEGIN" );
     if( $file =~ /\.gz$/i )
     {
-        open( $fh, "gunzip -c $file |" ) or die( "Could not open $file:\n$!\n" );
+        open( $fh, "gunzip -c $file |" ) or die "Could not open $file: $!\n";
     }
     elsif( $file =~ /\.csv$/i )
     {
-        open( $fh, "< $file" ) or die( "Could not open $file:\n$!\n" );
+        open( $fh, "< $file" ) or die "Could not open $file: $!\n";
     }
     else
     {
-        die( "File $file must be either CSV or GZIP\n" );
+        die "File $file must be either CSV or GZIP\n";
     }
 
-    my $line_count = 0;
-    print "Restoring table contents...\n" if( DEBUG );
+    print "Restoring from $file\n";
 
     my $csv = Text::CSV_XS->new( { binary => 1, eol => "\n" } );
-    my $audit_event_insert_q = <<__EOF__;
-        INSERT INTO $schema.tb_audit_event_restore
-                    (
-                        audit_event,
-                        audit_field,
-                        row_pk_val,
-                        recorded,
-                        uid,
-                        row_op,
-                        txid,
-                        pid,
-                        audit_transaction_type,
-                        old_value,
-                        new_value
-                    )
-             VALUES
-                    (
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?
-                    )
-__EOF__
-    my $audit_event_sth = $handle->prepare( $audit_event_insert_q );
+
+    my $headers = $csv->getline($fh);
+
+    # Header determination logic
+    my $count = 0;
+    my %header_hash = map { $_ => $count++ } @$headers;
     
-    my $update_audit_field_q = "UPDATE $schema.tb_audit_field SET audit_data_type = ? WHERE audit_field = ?";
-    my $update_audit_field_sth = $handle->prepare( $update_audit_field_q );
-    my $header_hash     = { };
+    my $tablespace_q    = "SELECT current_setting('${schema}.archive_tablespace')";
+    my ($tablespace)    = $handle->selectrow_array($tablespace_q)
+        or die( "Could not determine archive tablespace\n" );
+    
+    $handle->do( "BEGIN" );
+
+    # Create table partition
+    $handle->do( "CREATE TABLE $schema.tb_audit_event_restore ( ) "
+               . "INHERITS (tb_audit_event) TABLESPACE ${tablespace}" )
+        or die( "Could not create partition table to restore CSV contents" );
+
+    my $line_count = 1;
 
     while( my $line = $csv->getline( $fh ) )
     {
         $line_count++;
 
-        if( $line_count == 1 )
+        my $audit_event = $line->[$header_hash{'audit_event'  }];
+        my $txid        = $line->[$header_hash{'txid'         }];
+        my $recorded    = $line->[$header_hash{'recorded'     }];
+        my $uid         = $line->[$header_hash{'uid'          }];
+        my $email       = $line->[$header_hash{'email_address'}];
+        my $table_name  = $line->[$header_hash{'table_name'   }];
+        my $column      = $line->[$header_hash{'column_name'  }];
+        my $row_pk_val  = $line->[$header_hash{'row_pk_val'   }];
+        my $row_op      = $line->[$header_hash{'row_op'       }];
+        my $pid         = $line->[$header_hash{'pid'          }];
+        my $description = $line->[$header_hash{'description'  }];
+        my $old_value   = $line->[$header_hash{'old_value'    }];
+        my $new_value   = $line->[$header_hash{'new_value'    }];
+        my $data_type   = $line->[$header_hash{'data_type'    }] 
+            if( defined $header_hash{'data_type'} );
+
+        if( $data_type and not $audit_data_types{$data_type} )
         {
-            my $tablespace_q    = "SELECT current_setting('${schema}.archive_tablespace') AS tablespace";
-            my $tablespace_sth  = $handle->prepare( $tablespace_q );
-               $tablespace_sth->execute() or die( "Could not determin archive tablespace\n" );
-            my $tablespace_row  = $tablespace_sth->fetchrow_hashref();
-            my $tablespace      = $tablespace_row->{'tablespace'};
-            
-            # Header determination logic
-            my $count = 0;
-            
-            foreach my $header( @$line )
-            {
-                $header_hash->{$header} = $count;
-                $count++;
-            }
-            
-            # Create table partition
-            print "Creating restoration table...\n";
-            $handle->do( "CREATE TABLE $schema.tb_audit_event_restore ( ) INHERITS (tb_audit_event) TABLESPACE ${tablespace}" )
-                or die( "Could not create partition table to restore CSV contents" );
-        }
-        else
+            $audit_data_type_sth->bind_param( 1, $data_type );
+            $audit_data_type_sth->execute() 
+                or die( "Could not get audit_data_type for data_type '$data_type'\n" );
+            my $audit_data_type_row = $audit_data_type_sth->fetchrow_arrayref();
+            $audit_data_types{$data_type} = $audit_data_type_row->[0];
+        }    
+
+        my $audit_data_type = $audit_data_types{$data_type} || 0;
+        
+        $audit_field_sth->bind_param( 1, $table_name      );
+        $audit_field_sth->bind_param( 2, $column          );
+       #$audit_field_sth->bind_param( 3, $audit_data_type );
+        $audit_field_sth->execute() 
+            or die( "Could not get/create audit field for table $table_name, column $column\n" );
+        my $audit_field_row = $audit_field_sth->fetchrow_arrayref();
+
+        $audit_transaction_type_sth->bind_param( 1, $description );
+        $audit_transaction_type_sth->execute() 
+            or die( "Could not get audit transaction type for label $description\n" );
+        my $audit_transaction_type_row = $audit_transaction_type_sth->fetchrow_arrayref();
+
+        my $audit_field             = $audit_field_row->[0];
+        my $audit_transaction_type  = $audit_transaction_type_row->[0];
+        
+        #if( $audit_data_type )
+        #{
+        #    # Update audit_field row to the audit_data_type
+        #    $update_audit_field_sth->bind_param( 1, $audit_data_type );
+        #    $update_audit_field_sth->bind_param( 2, $audit_field     );
+        #    $update_audit_field_sth->execute()
+        #        or die( "Could not update audit_field $audit_field to audit_data_type $audit_data_type\n" );
+        #}
+
+        $audit_event_sth->bind_param( 1,  $audit_event              );
+        $audit_event_sth->bind_param( 2,  $audit_field              );
+        $audit_event_sth->bind_param( 3,  $row_pk_val               );
+        $audit_event_sth->bind_param( 4,  $recorded                 );
+        $audit_event_sth->bind_param( 5,  $uid                      );
+        $audit_event_sth->bind_param( 6,  $row_op                   );
+        $audit_event_sth->bind_param( 7,  $txid                     );
+        $audit_event_sth->bind_param( 8,  $pid                      );
+        $audit_event_sth->bind_param( 9,  $audit_transaction_type   );
+        $audit_event_sth->bind_param( 10, $old_value                );
+        $audit_event_sth->bind_param( 11, $new_value                );
+        $audit_event_sth->execute() or die( "Could not insert row\n" );
+
+        if( $line_count % 1000 == 1 ) 
         {
-            my $audit_event = $line->[$header_hash->{'audit_event'  }];
-            my $txid        = $line->[$header_hash->{'txid'         }];
-            my $recorded    = $line->[$header_hash->{'recorded'     }];
-            my $uid         = $line->[$header_hash->{'uid'          }];
-            my $email       = $line->[$header_hash->{'email_address'}];
-            my $table_name  = $line->[$header_hash->{'table_name'   }];
-            my $column      = $line->[$header_hash->{'column_name'  }];
-            my $row_pk_val  = $line->[$header_hash->{'row_pk_val'   }];
-            my $row_op      = $line->[$header_hash->{'row_op'       }];
-            my $pid         = $line->[$header_hash->{'pid'          }];
-            my $description = $line->[$header_hash->{'description'  }];
-            my $old_value   = $line->[$header_hash->{'old_value'    }];
-            my $new_value   = $line->[$header_hash->{'new_value'    }];
-            my $data_type   = $line->[$header_hash->{'data_type'    }] if( defined $header_hash->{'data_type'} );
-
-            my $audit_data_type;
-
-            if( $data_type )
-            {
-                $get_audit_data_type_sth->bind_param( 1, $data_type );
-                $get_audit_data_type_sth->execute() or die( "Could not determine audit_data_type for $data_type\n" );
-                my $audit_data_type_row = $get_audit_data_type_sth->fetchrow_hashref();
-                $audit_data_type = $audit_data_type_row->{'audit_data_type'};
-            }    
-            
-            $get_audit_field_sth->bind_param( 1, $table_name );
-            $get_audit_field_sth->bind_param( 2, $column     );
-            $get_audit_field_sth->execute() or die( "Could not get/create audit field for table $table_name, column $column\n" );
-            my $audit_field_row = $get_audit_field_sth->fetchrow_hashref();
-
-            $get_audit_transaction_type_sth->bind_param( 1, $description );
-            $get_audit_transaction_type_sth->execute() or die( "Could not get audit transaction type for label $description\n" );
-            my $audit_transaction_type_row = $get_audit_transaction_type_sth->fetchrow_hashref();
-
-            my $audit_field             = $audit_field_row->{'audit_field'};
-            my $audit_transaction_type  = $audit_transaction_type_row->{'audit_transaction_type'};
-            
-            if( $audit_data_type )
-            {
-                # Update audit_field row to the audit_data_type
-                $update_audit_field_sth->bind_param( 1, $audit_data_type );
-                $update_audit_field_sth->bind_param( 2, $audit_field     );
-                $update_audit_field_sth->execute()
-                    or die( "Could not update audit_field $audit_field to have audit_data_type $audit_data_type\n" );
-            }
-
-            $audit_event_sth->bind_param( 1,  $audit_event              );
-            $audit_event_sth->bind_param( 2,  $audit_field              );
-            $audit_event_sth->bind_param( 3,  $row_pk_val               );
-            $audit_event_sth->bind_param( 4,  $recorded                 );
-            $audit_event_sth->bind_param( 5,  $uid                      );
-            $audit_event_sth->bind_param( 6,  $row_op                   );
-            $audit_event_sth->bind_param( 7,  $txid                     );
-            $audit_event_sth->bind_param( 8,  $pid                      );
-            $audit_event_sth->bind_param( 9,  $audit_transaction_type   );
-            $audit_event_sth->bind_param( 10, $old_value                );
-            $audit_event_sth->bind_param( 11, $new_value                );
-            $audit_event_sth->execute() or die( "Could not insert row\n" );
+            my $delta = microtime() - $start_time;
+            my $rate = $line_count / $delta;
+            printf "\r%d rows restored at %d rows/sec... ", 
+                $line_count - 1, $rate;
         }
+
     }
 
     close( $fh ) or die( "Could not close '$file':\n$!\n" );
-    print "Done, restored " . ( $line_count - 1 ) . " rows.\n" if( DEBUG );
+    print "\nDone.\n";
 
     #Rename table and add check constraint to partition
     print "Getting contraint bounds and table suffix...\n" if( DEBUG );
@@ -305,7 +277,8 @@ WITH tt_recorded AS
            min( txid     ) AS min_txid
       FROM $schema.tb_audit_event_restore
 )
-    SELECT to_char( tt.max_recorded, 'YYYYMMDD_HH24MI' ) AS suffix,
+    SELECT 'tb_audit_event' || to_char( tt.max_recorded, 'YYYYMMDD_HH24MI' ) 
+                AS table_name,
            tt.max_recorded,
            tt.min_recorded,
            tt.max_txid,
@@ -313,16 +286,14 @@ WITH tt_recorded AS
       FROM tt_recorded tt
 __EOF__
     
-    my $max_recorded_sth = $handle->prepare( $max_recorded_q );
-       $max_recorded_sth->execute() or die( "Could not determine the recorded date range for table partition\n" );
-    my $max_recorded_row = $max_recorded_sth->fetchrow_hashref();
+    my $max_recorded_row = $handle->selectrow_hashref( $max_recorded_q )
+        or die( "Could not determine the recorded date range for table partition\n" );
     
-    my $table_suffix = $max_recorded_row->{'suffix'      };
+    my $table_name   = $max_recorded_row->{'table_name'  };
     my $max_rec      = $max_recorded_row->{'max_recorded'};
     my $min_rec      = $max_recorded_row->{'min_recorded'};
     my $max_txid     = $max_recorded_row->{'max_txid'    };
     my $min_txid     = $max_recorded_row->{'min_txid'    };
-    my $table_name   = "tb_audit_event_$table_suffix";
     
     print "Renaming table...\n" if( DEBUG );
     
@@ -335,14 +306,16 @@ __EOF__
     
     $constraint_q = <<__EOF__;
     ALTER TABLE ${schema}.${table_name}
-        ADD CONSTRAINT ${table_name}_recorded_check CHECK( recorded >= '${min_rec}'::TIMESTAMP AND recorded <= '${max_rec}'::TIMESTAMP )
+        ADD CONSTRAINT ${table_name}_recorded_check 
+        CHECK( recorded >= '${min_rec}'::TIMESTAMP AND recorded <= '${max_rec}'::TIMESTAMP )
 __EOF__
     
     $handle->do( $constraint_q ) or die( "Could not add recorded constraint to table partition\n" );
 
     $constraint_q = <<__EOF__;
     ALTER TABLE ${schema}.${table_name}
-        ADD CONSTRAINT ${table_name}_txid_check CHECK( txid >= ${min_txid}::BIGINT AND txid <= ${max_txid}::BIGINT )
+        ADD CONSTRAINT ${table_name}_txid_check 
+        CHECK( txid >= ${min_txid}::BIGINT AND txid <= ${max_txid}::BIGINT )
 __EOF__
     
     $handle->do( $constraint_q ) or die( "Could not add txid constraint to table partition\n" );
@@ -364,10 +337,10 @@ __EOF__
         or die( "Failed to set UPDATE perms\n" );
 
     $handle->do( "COMMIT" ) or die( "Could not commit restore operation\n" );
-    my $end_time = microtime(1);
+    my $end_time = microtime();
     my $delta    = ( $end_time - $start_time ) / 3600;
     print "Processed '$file' in $delta hours\n";
 }
 
-print "Successfully processed " . scalar @files . " files.\n";
+print "Successfully processed " . scalar @ARGV . " files.\n";
 exit 0;
