@@ -1,5 +1,7 @@
 drop function fn_rotate_audit_events();
 
+alter sequence @extschema@.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
+
 -- fn_update_audit_event_log_trigger_on_table
 CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_event_log_trigger_on_table
 (

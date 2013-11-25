@@ -821,86 +821,6 @@ end
  $_$
     language 'plpgsql';
 
--- fn_rotate_audit_events
-CREATE OR REPLACE FUNCTION @extschema@.fn_rotate_audit_events() returns void as
- $_$
-declare
-    my_min_recorded timestamp;
-    my_max_recorded timestamp;
-    my_min_txid     bigint;
-    my_max_txid     bigint;
-    my_table_name   varchar;
-    my_query        varchar;
-begin
-    if (select count(1) from @extschema@.tb_audit_event_current) = 0 then
-        raise exception 'No events to rotate';
-    end if;
-
-    -- make a name for the archive table
-    my_table_name := 'tb_audit_event_' || to_char(now(), 'YYYYMMDD_HH24MI');
-
-    -- drop constraint
-    alter table @extschema@.tb_audit_event_current 
-        drop constraint if exists tb_audit_event_current_recorded_check;
-
-    -- rename (archive) table
-    execute 'alter table @extschema@.tb_audit_event_current rename to '
-         || my_table_name;
-
-    -- create new current table
-    create table @extschema@.tb_audit_event_current() 
-        inherits ( @extschema@.tb_audit_event );
-
-    alter extension cyanaudit
-        add table @extschema@.tb_audit_event_current;
-
-    grant insert on @extschema@.tb_audit_event_current to public;
-    grant select (audit_transaction_type,txid) 
-       on @extschema@.tb_audit_event_current to public;
-    grant update (audit_transaction_type) 
-       on @extschema@.tb_audit_event_current to public;
-
-    -- add check constraint to new current table
-    execute 'alter table @extschema@.tb_audit_event_current '
-         || 'add constraint tb_audit_event_current_recorded_check '
-         || 'check(recorded >= '''||now()::timestamp::text ||''')';
-
-    -- rename indexes on archived table
-    execute 'alter index @extschema@.tb_audit_event_current_txid_idx rename to '
-            ||my_table_name||'_txid_idx';
-    execute 'alter index @extschema@.tb_audit_event_current_recorded_idx rename to '
-            ||my_table_name||'_recorded_idx';
-    execute 'alter index @extschema@.tb_audit_event_current_audit_field_idx rename to '
-            ||my_table_name||'_audit_field_idx';
-
-    -- create indexes on new table
-    create index tb_audit_event_current_txid_idx
-        on @extschema@.tb_audit_event_current(txid);
-    create index tb_audit_event_current_recorded_idx
-        on @extschema@.tb_audit_event_current(recorded);
-    create index tb_audit_event_current_audit_field_idx
-        on @extschema@.tb_audit_event_current(audit_field);
-
-    -- get mins & maxes for creating check constraints
-    execute 'select max(recorded), min(recorded), '
-         || '       min(txid), max(txid) '
-         || '  from @extschema@.'||my_table_name
-       into my_max_recorded, my_min_recorded,
-            my_min_txid, my_max_txid;
-
-    -- add check constraints to archived table
-    execute 'alter table @extschema@.' || my_table_name || ' add check(recorded between '''
-         || my_min_recorded || ''' and ''' || my_max_recorded || ''')';
-    execute 'alter table @extschema@.' || my_table_name
-         || '  add check(txid between '''
-         ||     my_min_txid || ''' and ''' || my_max_txid || ''')';
-
-    -- move table to appropriate tablespace
-    execute 'alter table @extschema@.' || my_table_name
-         || ' set tablespace ' || current_setting('cyanaudit.archive_tablespace');
-end
- $_$
-    language 'plpgsql';
 
 
 ------------------
@@ -959,7 +879,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_transaction_type
 ALTER SEQUENCE sq_pk_audit_transaction_type
     owned by @extschema@.tb_audit_transaction_type.audit_transaction_type;
 
-CREATE SEQUENCE @extschema@.sq_pk_audit_event;
+CREATE SEQUENCE @extschema@.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
 
 -- tb_audit_event
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
