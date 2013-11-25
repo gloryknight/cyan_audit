@@ -211,3 +211,131 @@ end
     language 'plpgsql';
 
 
+
+-- fn_get_or_create_audit_field
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_field
+(
+    in_table_name       varchar,
+    in_column_name      varchar,
+    in_audit_data_type  integer default null
+)
+returns integer as
+ $_$
+declare
+    my_audit_field   integer;
+    my_active        boolean;
+begin
+    select audit_field
+      into my_audit_field
+      from @extschema@.tb_audit_field
+     where table_name = in_table_name
+       and column_name = in_column_name;
+
+    if not found then
+        perform *
+           from @extschema@.tb_audit_field
+          where table_name = in_table_name
+          limit 1;
+
+        if found then
+            perform *
+               from @extschema@.tb_audit_field
+              where table_name = in_table_name
+                and active = true
+              limit 1;
+
+            if found then
+                my_active = true;
+            else
+                my_active = false;
+            end if;
+        else
+            perform *
+               from information_schema.columns
+              where table_schema = 'public'
+                and table_name = in_table_name
+                and column_name = in_column_name;
+
+            if found then
+                my_active = true;
+            else
+                my_active = false;
+            end if;
+        end if;
+
+        insert into @extschema@.tb_audit_field
+        (
+            table_name,
+            column_name,
+            active,
+            audit_data_type
+        )
+        values
+        (
+            in_table_name,
+            in_column_name,
+            my_active,
+            in_audit_data_type
+        )
+        returning audit_field
+        into my_audit_field;
+    end if;
+
+    return my_audit_field;
+end
+ $_$
+    language 'plpgsql';
+
+
+
+
+-- fn_check_audit_field_validity
+CREATE OR REPLACE FUNCTION @extschema@.fn_check_audit_field_validity()
+returns trigger as
+ $_$
+declare
+    my_pk_col           varchar;
+begin
+    if TG_OP = 'UPDATE' then
+        if NEW.table_name  != OLD.table_name or
+           NEW.column_name != OLD.column_name
+        then
+            raise exception 'Updating table_name or column_name not allowed.';
+        end if;
+    end if;
+
+    NEW.audit_data_type := coalesce(
+        NEW.audit_data_type,
+        @extschema@.fn_get_or_create_audit_data_type(
+            @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
+        ),
+        0
+    );
+
+    if NEW.table_pk is null then
+        my_pk_col := @extschema@.fn_get_table_pk_col(NEW.table_name);
+
+        if my_pk_col is null then
+            NEW.table_pk := 0;
+        else
+            if my_pk_col = NEW.column_name then
+                NEW.table_pk := NEW.audit_field;
+            else
+                NEW.table_pk := @extschema@.fn_get_or_create_audit_field (
+                                    NEW.table_name,
+                                    my_pk_col
+                                );
+            end if;
+        end if;
+    end if;
+
+    if NEW.active and NEW.table_pk = 0 then
+        raise exception 'Cannot audit table %: No PK column found',
+            NEW.table_name;
+    end if;
+
+    return NEW;
+end
+ $_$
+    language plpgsql;
+

@@ -492,8 +492,17 @@ begin
                 my_active = false;
             end if;
         else
-            -- TODO: If field does not exist in DB, set active = false
-            my_active = true;
+            perform *
+               from information_schema.columns
+              where table_schema = 'public'
+                and table_name = in_table_name
+                and column_name = in_column_name;
+
+            if found then
+                my_active = true;
+            else
+                my_active = false;
+            end if;
         end if;
           
         insert into @extschema@.tb_audit_field
