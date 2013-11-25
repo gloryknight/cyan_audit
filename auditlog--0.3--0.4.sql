@@ -1,3 +1,5 @@
+drop function fn_rotate_audit_events();
+
 -- fn_update_audit_event_log_trigger_on_table
 CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_event_log_trigger_on_table
 (
