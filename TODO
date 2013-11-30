@@ -1,7 +1,7 @@
 Add support for logging schemas other than public
 Add checking to ensure no logging of auditlog schema
 Package for pgxn
-Add checking for correct version of Postgres
+Add checking for correct version of Postgres (9.1.7)
 Correctly handle missing settings in postgresql.conf
 Branding
 Custom variable classes should use branded name, not schema name.

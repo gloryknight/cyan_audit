@@ -339,3 +339,11 @@ end
  $_$
     language plpgsql;
 
+
+
+
+--- RENAME EXTENSION
+update pg_extension
+   set extname = 'cyanaudit'
+ where extname = 'auditlog';
+

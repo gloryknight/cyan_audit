@@ -2,7 +2,7 @@
 BEFORE RUNNING THIS SCRIPT:
 1. Create the audit_log schema in your database
 2. Make sure the following lines appear at the bottom of postgresql.conf.
-   Customize the last three values to match your database configuration.
+   Customize the last five values to match your database configuration.
    When you have added these lines, be sure to reload postgres.
 
    # Don't change these
@@ -28,7 +28,14 @@ do language plpgsql
 declare
     my_missing_config   varchar;
     my_value            varchar;
+    my_version          integer[];
 begin
+    my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
+
+    if my_version < array[9,1,7]::integer[] then
+        raise exception 'Cyan Audit requires PostgreSQL 9.1.7 or above';
+    end if;
+
     if (select count(*) from pg_language where lanname = 'plperl') = 0 then
         create language plperl;
         alter extension cyanaudit drop language plperl;
@@ -1101,6 +1108,39 @@ CREATE TRIGGER tr_check_audit_field_validity
     BEFORE INSERT OR UPDATE ON @extschema@.tb_audit_field
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_check_audit_field_validity();
 
+
+do language plpgsql
+ $$
+declare
+    my_version  integer[];
+    my_cmd      text;
+begin
+    -- If on PostgreSQL 9.3 or above, add a DDL trigger to run
+    -- fn_update_audit_fields() automatically. Use EXECUTE to avoid syntax 
+    -- errors during installation on older versions.
+
+    my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
+
+    if my_version >= array[9,3,0]::integer[] then
+        my_cmd := 'CREATE OR REPLACE FUNCTION fn_update_audit_fields_event_trigger() '
+               || 'returns event_trigger '
+               || 'language plpgsql as '
+               || '   $function$ '
+               || 'begin '
+               || '     perform fn_update_audit_fields(); '
+               || 'end '
+               || '   $function$; ';
+
+        execute my_cmd;
+
+        my_cmd := 'CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_event_end '
+               || '    WHEN TAG IN (''ALTER TABLE'', ''CREATE TABLE'', ''DROP TABLE'') '
+               || '    EXECUTE PROCEDURE fn_update_audit_fields_event_trigger(); ';
+
+        execute my_cmd;
+    end if;
+end;
+ $$;
 
 --- PERMISSIONS
 
