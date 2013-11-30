@@ -1,10 +1,6 @@
 Add support for logging schemas other than public
 Add checking to ensure no logging of auditlog schema
 Package for pgxn
-Add checking for correct version of Postgres (9.1.7)
 Correctly handle missing settings in postgresql.conf
 Branding
 Custom variable classes should use branded name, not schema name.
-Add DDL trigger if PG 9.3 or above
-Add audit_data_type optional param to fn_get_or_create_audit_field()
-Check existence of column before setting active in fn_get_or_create_audit_field()
