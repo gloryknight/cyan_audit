@@ -4,3 +4,4 @@ Package for pgxn
 Correctly handle missing settings in postgresql.conf
 Branding
 Custom variable classes should use branded name, not schema name.
+Rewrite tablespaces script in perl to auto-detect table space
