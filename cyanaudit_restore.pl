@@ -84,7 +84,7 @@ my $table_q = <<__EOF__;
 INNER JOIN pg_namespace n
         ON c.relnamespace = n.oid
      WHERE c.relkind = 'r'
-       AND n.nspname = '$schema'
+       AND n.nspname = '${schema}'
        AND c.relname = 'tb_audit_event_current';
 __EOF__
 
@@ -134,7 +134,7 @@ __EOF__
 my $audit_event_sth = $handle->prepare( $audit_event_insert_q );
 
 my $update_audit_field_q = <<__EOF__;
-    UPDATE $schema.tb_audit_field 
+    UPDATE ${schema}.tb_audit_field 
        SET audit_data_type = ? 
      WHERE audit_field = ?
 __EOF__
@@ -221,6 +221,7 @@ foreach my $file( @ARGV )
        #$audit_field_sth->bind_param( 3, $audit_data_type );
         $audit_field_sth->execute() 
             or die( "Could not get/create audit field for table $table_name, column $column\n" );
+
         my $audit_field_row = $audit_field_sth->fetchrow_arrayref();
 
         $audit_transaction_type_sth->bind_param( 1, $description );
@@ -230,27 +231,18 @@ foreach my $file( @ARGV )
 
         my $audit_field             = $audit_field_row->[0];
         my $audit_transaction_type  = $audit_transaction_type_row->[0];
-        
-        #if( $audit_data_type )
-        #{
-        #    # Update audit_field row to the audit_data_type
-        #    $update_audit_field_sth->bind_param( 1, $audit_data_type );
-        #    $update_audit_field_sth->bind_param( 2, $audit_field     );
-        #    $update_audit_field_sth->execute()
-        #        or die( "Could not update audit_field $audit_field to audit_data_type $audit_data_type\n" );
-        #}
 
-        $audit_event_sth->bind_param( 1,  $audit_event              );
-        $audit_event_sth->bind_param( 2,  $audit_field              );
-        $audit_event_sth->bind_param( 3,  $row_pk_val               );
-        $audit_event_sth->bind_param( 4,  $recorded                 );
-        $audit_event_sth->bind_param( 5,  $uid                      );
-        $audit_event_sth->bind_param( 6,  $row_op                   );
-        $audit_event_sth->bind_param( 7,  $txid                     );
-        $audit_event_sth->bind_param( 8,  $pid                      );
-        $audit_event_sth->bind_param( 9,  $audit_transaction_type   );
-        $audit_event_sth->bind_param( 10, $old_value                );
-        $audit_event_sth->bind_param( 11, $new_value                );
+        $audit_event_sth->bind_param( 1,  $audit_event               );
+        $audit_event_sth->bind_param( 2,  $audit_field               );
+        $audit_event_sth->bind_param( 3,  $row_pk_val                );
+        $audit_event_sth->bind_param( 4,  $recorded                  );
+        $audit_event_sth->bind_param( 5,  $uid                       );
+        $audit_event_sth->bind_param( 6,  $row_op                    );
+        $audit_event_sth->bind_param( 7,  $txid                      );
+        $audit_event_sth->bind_param( 8,  $pid                       );
+        $audit_event_sth->bind_param( 9,  $audit_transaction_type    );
+        $audit_event_sth->bind_param( 10, $old_value                 );
+        $audit_event_sth->bind_param( 11, $new_value                 );
         $audit_event_sth->execute() or die( "Could not insert row\n" );
 
         if( $line_count % 1000 == 1 ) 
@@ -275,7 +267,7 @@ WITH tt_recorded AS
            min( recorded ) AS min_recorded,
            max( txid     ) AS max_txid,
            min( txid     ) AS min_txid
-      FROM $schema.tb_audit_event_restore
+      FROM ${schema}.tb_audit_event_restore
 )
     SELECT 'tb_audit_event' || to_char( tt.max_recorded, 'YYYYMMDD_HH24MI' ) 
                 AS table_name,
@@ -298,7 +290,7 @@ __EOF__
     print "Renaming table...\n" if( DEBUG );
     
     $handle->do( "DROP TABLE IF EXISTS ${schema}.${table_name}" );
-    $handle->do( "ALTER TABLE ${schema}.tb_audit_event_restore RENAME TO $table_name" )
+    $handle->do( "ALTER TABLE ${schema}.tb_audit_event_restore RENAME TO ${table_name}" )
          or die( "Could not rename tb_audit_event_restore to $table_name\n" );
 
     my $constraint_q = '';
