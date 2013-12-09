@@ -6,14 +6,15 @@ DOCS         = $(wildcard doc/*.md)
 SCRIPTS      = $(wildcard tools/*)
 
 PG_CONFIG    = pg_config
-DATA         = $(wildcard sql/*--*--*.sql) sql/$(EXTENSION)--$(EXTVERSION).sql
+DATA         = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION)--$(EXTVERSION).sql
+PKG_SQL      = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION).sql
 EXTRA_CLEAN  = sql/$(EXTENSION)--$(EXTVERSION).sql
 
 PKGFILES     = cyanaudit.control LICENSE Makefile META.json \
-		       $(DATA $(DOCS) $(SCRIPTS)
+               $(PKG_SQL) $(DOCS) $(SCRIPTS)
 
-PKGNAME	     = $(EXTENSION)-$(EXTVERSION)
-PKG_TGZ	     = dist/$(PKGNAME).tar.gz
+PKGNAME      = $(EXTENSION)-$(EXTVERSION)
+PKG_TGZ      = dist/$(PKGNAME).tar.gz
 
 PG91         = $(shell $(PG_CONFIG) --version | grep -qE " 8\\.| 9\\.0| 9\\.1\\.[0-6]" && echo no || echo yes)
 
