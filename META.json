@@ -1,0 +1,51 @@
+{
+    "name": "Cyan Audit",
+    "abstract": "DML logging tool for PostgreSQL",
+    "description": "Cyan Audit provides in-database logging of all DML activity on a column-by-column basis",
+    "version": "0.4",
+    "maintainer": "Moshe Jacobson <moshe@neadwerx.com>",
+    "license": "postgresql",
+    "provides" {
+        "cyanaudit: {
+            "file": "sql/cyanaudit.sql"
+            "docfile": "doc/cyanaudit.md"
+            "version": "0.4"
+            "abstract": "Cyan Audit core extension" 
+        }
+    }
+    "meta-spec": {
+        "version": "1.0.0",
+        "url": "http://pgxn.org/meta/spec.txt"
+    }
+    "tags": [ 
+        "audit",
+        "auditing",
+        "logging",
+        "audit log",
+        "logger",
+        "log",
+        "cyan audit",
+        "audit trail",
+        "DML log",
+        "trigger-based logging",
+        "auditing",
+        "history"
+    ],
+    "prereqs": {
+        "runtime": {
+            "requires": {
+                "PostgreSQL": "9.1.7"
+            }
+        }
+    },
+    "release-status": "testing",
+    "resources": {
+        "homepage": "http://cyanaudit.neadwerx.com",
+    }
+}
+    
+
+
+
+
+    
