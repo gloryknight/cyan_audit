@@ -44,6 +44,11 @@ my $user    = $opt_U;
 my $host    = $opt_h;
 my $dbname  = $opt_d;
 
+unless( @ARGV )
+{
+    &usage( "Must specify at least one file to restore" );
+}
+
 foreach my $file (@ARGV)
 {
     ( -f $file and -r $file and -s $file )
@@ -205,20 +210,25 @@ foreach my $file( @ARGV )
         my $data_type   = $line->[$header_hash{'data_type'    }] 
             if( defined $header_hash{'data_type'} );
 
-        if( $data_type and not $audit_data_types{$data_type} )
-        {
-            $audit_data_type_sth->bind_param( 1, $data_type );
-            $audit_data_type_sth->execute() 
-                or die( "Could not get audit_data_type for data_type '$data_type'\n" );
-            my $audit_data_type_row = $audit_data_type_sth->fetchrow_arrayref();
-            $audit_data_types{$data_type} = $audit_data_type_row->[0];
-        }    
+        my $audit_data_type = undef;
 
-        my $audit_data_type = $audit_data_types{$data_type} || 0;
+        if( $data_type )
+        {
+            if( not $audit_data_types{$data_type} )
+            {
+                $audit_data_type_sth->bind_param( 1, $data_type );
+                $audit_data_type_sth->execute() 
+                    or die( "Could not translate data_type '$data_type'\n" );
+                my $audit_data_type_row = $audit_data_type_sth->fetchrow_arrayref();
+                $audit_data_types{$data_type} = $audit_data_type_row->[0];
+            }
+
+            $audit_data_type = $audit_data_types{$data_type} || 0;
+        }    
         
         $audit_field_sth->bind_param( 1, $table_name      );
         $audit_field_sth->bind_param( 2, $column          );
-       #$audit_field_sth->bind_param( 3, $audit_data_type );
+        #$audit_field_sth->bind_param( 3, $audit_data_type );
         $audit_field_sth->execute() 
             or die( "Could not get/create audit field for table $table_name, column $column\n" );
 
