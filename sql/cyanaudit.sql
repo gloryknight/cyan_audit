@@ -1105,7 +1105,7 @@ begin
 
         execute my_cmd;
 
-        my_cmd := 'CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_event_end '
+        my_cmd := 'CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end '
                || '    WHEN TAG IN (''ALTER TABLE'', ''CREATE TABLE'', ''DROP TABLE'') '
                || '    EXECUTE PROCEDURE fn_update_audit_fields_event_trigger(); ';
 
