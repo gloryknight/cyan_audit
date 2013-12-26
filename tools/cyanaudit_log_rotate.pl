@@ -55,17 +55,17 @@ $q = "select n.nspname "
    . "  from pg_extension e "
    . "  join pg_namespace n "
    . "    on e.extnamespace = n.oid "
-   . " where e.extname = 'auditlog'";
+   . " where e.extname = 'cyanaudit'";
 
 my ($schema) = $handle->selectrow_array($q)
     or die "Could not determine audit log schema\n";
 
-print "Found auditlog in schema '$schema'\n";
+print "Found cyanaudit in schema '$schema'\n";
 
 
 ### Find cyanaudit tablespace
 
-$q = "select current_setting('auditlog.archive_tablespace') as tablespace ";
+$q = "select current_setting('cyanaudit.archive_tablespace') as tablespace ";
 
 my ($tablespace) = $handle->selectrow_array($q)
     or die "Could not determine audit log tablespace\n";
@@ -120,7 +120,7 @@ $handle->do("begin");
 
 print "Setting permissions and extension ownership of new table... ";
 
-$q = "alter extension auditlog add table $schema.tb_audit_event_current";
+$q = "alter extension cyanaudit add table $schema.tb_audit_event_current";
 $handle->do($q) or die "Could not set extension ownership of new audit table\n";
 
 $q = "grant insert on $schema.tb_audit_event_current to public";

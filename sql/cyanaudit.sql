@@ -50,25 +50,17 @@ begin
 
     my_missing_config := '';
 
-    perform *
-       from unnest(regexp_split_to_array(current_setting('custom_variable_classes'), '\s*,\s*')) 
-                as classname 
-      where classname = 'cyanaudit';
-
-    if not found then
-        my_missing_config := my_missing_config
-                          || E'custom_variable_classes = ''cyanaudit''\n';
+    if my_version < array[9,2,0]::integer[] then
+        begin
+            if current_setting('cyanaudit.uid') != '-1' then
+                raise exception undefined_object;
+            end if;
+        exception
+            when undefined_object
+            then my_missing_config := my_missing_config
+                                   || E'cyanaudit.uid = -1\n';
+        end;
     end if;
-
-    begin
-        if current_setting('cyanaudit.uid') != '-1' then
-            raise exception undefined_object;
-        end if;
-    exception
-        when undefined_object
-        then my_missing_config := my_missing_config
-                               || E'cyanaudit.uid = -1\n';
-    end;
           
     begin
         if current_setting('cyanaudit.last_txid') != '0' then
@@ -97,6 +89,7 @@ begin
 end;
  $$;
 
+-- fn_set_audit_uid
 CREATE OR REPLACE FUNCTION fn_set_audit_uid
 (
     in_uid   integer
@@ -110,6 +103,7 @@ end;
     language plpgsql strict;
 
 
+-- fn_get_audit_uid
 CREATE OR REPLACE FUNCTION fn_get_audit_uid() returns integer as
  $_$
 declare
@@ -145,6 +139,7 @@ end
     language plpgsql strict;
 
 
+-- fn_get_last_audit_txid
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_last_audit_txid()
 returns bigint as
  $_$
@@ -154,6 +149,7 @@ end
  $_$
     language plpgsql stable;
 
+-- fn_get_email_by_audit_uid
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_email_by_audit_uid
 (
     in_uid  integer
@@ -172,10 +168,14 @@ begin
        into my_email;
 
     return my_email;
+exception
+    when undefined_object
+    then return null;
 end
  $_$
     language plpgsql stable strict;
 
+-- fn_get_audit_uid_by_username
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid_by_username
 (
     in_username varchar
@@ -194,11 +194,15 @@ begin
        into my_uid;
 
     return my_uid;
+exception
+    when undefined_object
+    then return null;
 end
  $_$
     language plpgsql stable strict;
 
 
+-- fn_get_column_data_type
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_column_data_type
 (
     in_table_name   varchar,
@@ -225,6 +229,7 @@ end
     language 'plpgsql' stable strict;
 
 
+-- fn_get_table_pk_col
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_table_pk_col
 (
     in_table_name   varchar
@@ -254,6 +259,7 @@ end
 
 
 
+-- fn_get_or_create_audit_transaction_type
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_transaction_type
 (
     in_label    varchar

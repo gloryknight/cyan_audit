@@ -98,20 +98,20 @@ my $schema_q = "select n.nspname "
              . "  from pg_extension e "
              . "  join pg_namespace n "
              . "    on e.extnamespace = n.oid "
-             . " where e.extname = 'auditlog'";
+             . " where e.extname = 'cyanaudit'";
 
 my $schema_row = $handle->selectrow_arrayref($schema_q)
     or die "Could not determine audit log schema\n";
 
 my $schema = $schema_row->[0];
 
-print "Found auditlog in schema '$schema'\n";
+print "Found cyanaudit in schema '$schema'\n";
 
-my $user_table_q = "select current_setting('auditlog.user_table') "
+my $user_table_q = "select current_setting('cyanaudit.user_table') "
                  . "        as user_table, "
-                 . "       current_setting('auditlog.user_table_email_col') "
+                 . "       current_setting('cyanaudit.user_table_email_col') "
                  . "        as user_table_email_col, "
-                 . "       current_setting('auditlog.user_table_uid_col') "
+                 . "       current_setting('cyanaudit.user_table_uid_col') "
                  . "        as user_table_uid_col ";
 
 my $user_table_row = $handle->selectrow_arrayref($user_table_q);
@@ -120,7 +120,7 @@ my ($user_table, $user_table_email_col, $user_table_uid_col) = @$user_table_row;
 
 unless( $user_table and $user_table_email_col and $user_table_uid_col )
 {
-    die "Could not get auditlog settings for user table from postgresql.conf\n";
+    die "Could not get cyanaudit settings for user table from postgresql.conf\n";
 }
 
 my $tables_q  = "select c.relname, ";
@@ -239,7 +239,7 @@ foreach my $table_row (@$table_rows)
     if( $opts{'r'} and $remove )
     {
         print "Dropping table $schema.$table... ";
-        $handle->do("alter extension auditlog drop table $schema.$table");
+        $handle->do("alter extension cyanaudit drop table $schema.$table");
         $handle->do("drop table $schema.$table");
         print "Done\n";
     }
