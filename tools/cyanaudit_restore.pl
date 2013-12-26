@@ -180,6 +180,8 @@ foreach my $file( @ARGV )
     my $tablespace_q    = "SELECT current_setting('${schema}.archive_tablespace')";
     my ($tablespace)    = $handle->selectrow_array($tablespace_q)
         or die( "Could not determine archive tablespace\n" );
+
+    print "Using tablespace $tablespace\n";
     
     $handle->do( "BEGIN" );
 
@@ -279,7 +281,7 @@ WITH tt_recorded AS
            min( txid     ) AS min_txid
       FROM ${schema}.tb_audit_event_restore
 )
-    SELECT 'tb_audit_event' || to_char( tt.max_recorded, 'YYYYMMDD_HH24MI' ) 
+    SELECT 'tb_audit_event_' || to_char( tt.max_recorded, 'YYYYMMDD_HH24MI' ) 
                 AS table_name,
            tt.max_recorded,
            tt.min_recorded,

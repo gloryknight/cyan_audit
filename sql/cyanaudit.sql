@@ -199,40 +199,6 @@ end
     language plpgsql stable strict;
 
 
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_all_table_columns()
-returns table
-(
-    table_name      varchar,
-    column_name     varchar,
-    data_type       varchar
-) as
- $_$
-begin
-    return query
-    with tt_tables_with_pk_col (table_name) as
-    (
-        select distinct tc.table_name
-          from information_schema.table_constraints tc
-          join information_schema.tables t
-            on t.table_schema = tc.table_schema
-               and t.table_name = tc.table_name
-               and t.table_type::text = 'BASE TABLE'
-         where tc.constraint_type = 'PRIMARY KEY'
-           and tc.table_schema = 'public'
-           and tc.table_name not like 'tb_audit_%'
-    )
-    select c.table_name::varchar, c.column_name::varchar, c.udt_name::varchar
-      from information_schema.columns c
-      join tt_tables_with_pk_col using(table_name)
-     where c.table_schema = 'public'
-     order by c.table_name, c.column_name;
-
-    return;
-end
- $_$
-    language plpgsql stable;
-
-
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_column_data_type
 (
     in_table_name   varchar,
