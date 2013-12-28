@@ -768,12 +768,14 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields() returns void as
  $_$
 begin
     perform *
-       from tb_audit_field
-      where audit_field = 0
+       from @extschema@.tb_audit_field
+      where audit_field = 0;
 
     if not found then
-        insert into tb_audit_data_type values (0, '[unknown]');
-        insert into tb_audit_field values (0, '[unknown]','[unknown]', 0, 0, false);
+        insert into @extschema@.tb_audit_data_type 
+             values (0, '[unknown]');
+        insert into @extschema@.tb_audit_field 
+             values (0, '[unknown]','[unknown]', 0, 0, false);
     end if;
 
     with tt_audit_fields as
@@ -1106,11 +1108,12 @@ begin
                || '   $function$ '
                || 'begin '
                || '     perform * '
-               || '        from tb_audit_field '
+               || '        from @extschema@.tb_audit_field '
+               || '       limit 1; '
                || ''
                || '     if found then '
                || '         perform @extschema@.fn_update_audit_fields(); '
-               || '     end if '
+               || '     end if; '
                || 'end '
                || '   $function$; ';
 
