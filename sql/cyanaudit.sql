@@ -1087,7 +1087,6 @@ CREATE TRIGGER tr_check_audit_field_validity
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_check_audit_field_validity();
 
 
-/*
 do language plpgsql
  $$
 declare
@@ -1106,7 +1105,12 @@ begin
                || 'language plpgsql as '
                || '   $function$ '
                || 'begin '
-               || '     perform @extschema@.fn_update_audit_fields(); '
+               || '     perform * '
+               || '        from tb_audit_field '
+               || ''
+               || '     if found then '
+               || '         perform @extschema@.fn_update_audit_fields(); '
+               || '     end if '
                || 'end '
                || '   $function$; ';
 
@@ -1116,11 +1120,10 @@ begin
                || '    WHEN TAG IN (''ALTER TABLE'', ''CREATE TABLE'', ''DROP TABLE'') '
                || '    EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger(); ';
 
---        execute my_cmd;
+        execute my_cmd;
     end if;
 end;
  $$;
-*/
 
 --- PERMISSIONS
 

@@ -4,6 +4,7 @@ update pg_extension
  where extname = 'auditlog';
 
 drop function fn_rotate_audit_events();
+drop function fn_get_or_create_audit_field(varchar, varchar);
 
 alter sequence @extschema@.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
 
