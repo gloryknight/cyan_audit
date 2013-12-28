@@ -1094,12 +1094,12 @@ begin
     my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
 
     if my_version >= array[9,3,0]::integer[] then
-        my_cmd := 'CREATE OR REPLACE FUNCTION fn_update_audit_fields_event_trigger() '
+        my_cmd := 'CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger() '
                || 'returns event_trigger '
                || 'language plpgsql as '
                || '   $function$ '
                || 'begin '
-               || '     perform fn_update_audit_fields(); '
+               || '     perform @extschema@.fn_update_audit_fields(); '
                || 'end '
                || '   $function$; ';
 
@@ -1107,7 +1107,7 @@ begin
 
         my_cmd := 'CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end '
                || '    WHEN TAG IN (''ALTER TABLE'', ''CREATE TABLE'', ''DROP TABLE'') '
-               || '    EXECUTE PROCEDURE fn_update_audit_fields_event_trigger(); ';
+               || '    EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger(); ';
 
         execute my_cmd;
     end if;
