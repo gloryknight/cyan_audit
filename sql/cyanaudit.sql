@@ -1087,6 +1087,7 @@ CREATE TRIGGER tr_check_audit_field_validity
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_check_audit_field_validity();
 
 
+/*
 do language plpgsql
  $$
 declare
@@ -1119,6 +1120,7 @@ begin
     end if;
 end;
  $$;
+*/
 
 --- PERMISSIONS
 
