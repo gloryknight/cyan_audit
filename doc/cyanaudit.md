@@ -1,5 +1,10 @@
+![Cyan Audit Logo](cyanaudit_logo.png)
+
 Cyan Audit 0.4
 ==============
+
+Synopsis
+--------
 
 Cyan Audit is a powerful extension for in-database logging of DDL.
 
@@ -16,8 +21,8 @@ never be logged! This is a big headache for the application developer who just
 wants to get the code written.
 
 Cyan Audit aims to solve this problem by providing an easy and powerful logging
-system that requires no modification to your application and is installed easily
-and cleanly as a PostgreSQL extension.
+system that requires minimal modification to your application and is installed
+easily and cleanly as a PostgreSQL extension.
 
 Cyan Audit can selectively log DDL on a column-by-column basis, and you can
 select which tables/columns to log using a simple UPDATE command.
@@ -36,17 +41,160 @@ modification logged for the given transaction ID.
 Does that sound interesting? Good, let's get started.
 
 
+Requirements & Limitations
+--------------------------
+
+* Requires PostgreSQL 9.1.7 or above.
+* Automatic DDL detection requires PostgreSQL 9.3.0 or above.
+* Requires languages `plpgsql` and `plperl`.
+* Currently only tables in schema `public` can be logged.
+* Currently only tables having a single-column PK of type integer can be logged.
+
+
 Installation
 ------------
 
-Unpack the source files into a directory in your file system:
+1. Unpack the source files into a directory in your file system:
 
-    tar zxvf cyanaudit-0.4.tar.gz
+        # tar zxvf cyanaudit-0.4.tar.gz
 
-Now go into the directory and simply run `make install`. You will have to have
-pg_config in your path in orderr for this to work. You can see if it is in your
-path by issuing the command 
+2. Now go into the directory and simply run `make install`. 
 
+   Note: You will have to have pg_config in your path in orderr for this to work.
+   You can see if it is in your path by issuing the command `which pg_config`. If
+   it is not found in your search path, you may need to add it by modifying your
+   login script (e.g. .bashrc) to add your /usr/pgsql-9.3/bin (or equivalent)
+   directory to your `$PATH`.
+
+3. Add the necessary configuration directives to your `postgresql.conf`:
+
+        custom_variable_classes = 'cyanaudit'            # Only for 9.1
+        cyanaudit.user_table = 'tb_entity'               # Your users table
+        cyanaudit.user_table_uid_col = 'entity'          # UserID column
+        cyanaudit.user_table_email_col = 'email_address' # Email column
+        cyanaudit.user_table_username_col = 'username'   # Username column
+        cyanaudit.archive_tablespace = 'pg_default'      # Tablespace for archives
+        cyanaudit.uid = -1                               # Do not modify
+        cyanaudit.last_txid = 0                          # Do not modify
+        cyanaudit.enabled = 1                            # Do not modify
+
+   The `user_table`, `user_table_uid_col` and `user_table_email_col` settings
+   allow Cyan Audit to display the userid and email of your users when you view
+   the logs.
+
+   If the `user_table_username_col` is set, Cyan Audit will be able to match a
+   userid from your application to a user in your database cluster. For this to
+   work, your database cluster usernames must match those of your application.
+
+   The `archive_tablespace` setting is the name of the tablespace to which you
+   would like your logs to be archived when they are rotated. This allows you to
+   put your older logs on cheaper, slower media than that of your main database.
+
+4. Log into your database as user `postgres` and create the schema and extension:
+
+        mydb=# CREATE SCHEMA cyanaudit;
+        mydb=# CREATE EXTENSION cyanaudit SCHEMA cyanaudit;
+
+5. Instruct Cyan Audit to update its list of tables & columns in your database:
+
+        mydb=# SELECT cyanaudit.fn_update_audit_fields();
+
+   This will automatically turn on logging for all columns of all tables having
+   a primary key column.
+
+6. (Optional) Add the Cyan Audit schema to your search path:
+
+        mydb=# ALTER DATABASE mydb SET search_path = 'public, cyanaudit';
+
+   This will keep you from having to preceed every relation and function in this
+   extension with `cyanaudit.`.
+
+At this point, logging should be turned on. Perform some DML (INSERT, UPDATE,
+DELETE) and then do `select * from cyanaudit.vw_audit_log` and see if your
+changes have been logged.
+
+
+Configuring Your Application
+============================
+
+Passing the User ID
+-------------------
+The only way for Cyan Audit to know the application-level userids of the people
+modifying the database is for your application to convey that information using
+the `fn_set_audit_uid()` function.
+
+This function must be called before any modifications take place, so it is
+normally called immediately after your application obtains a database handle:
+
+    SELECT fn_set_audit_uid( userid );
+
+Of course, you will need to bind the userid where you see the `userid` parameter
+above.
+
+The userid you set here will persist for the remainder of the session. If you
+want to un-set it at any point, you can set the userid to -1 or use the `DISCARD
+ALL` SQL command to discard all session-specific settings.
+
+Labeling Transactions
+---------------------
+Cyan Audit has the ability to attach textual labels to your transactions, so
+that your application can provide easily understood descriptions of what was
+happening in that transaction, for example to indicate the module of code that
+made the modification, or to allow the layperson to understand the logs a little
+bit more easily.
+
+To use this feature, your application must call `fn_label_audit_transaction()`
+after any transaction you wish to label:
+
+    SELECT fn_label_audit_transaction('User Added');
+
+This will label all actions performed within the current transaction up until
+the point that this function is called. If future modifications are made after
+the function is called, they will not be labeled until the function is caalled
+again.
+
+The text string you specify here is automatically added to a distinct list of
+labels that can be used over and over without copying the actual text onto each
+transaction, so it is very efficient from the perspective of disk usage.
+
+
+Viewing the Logs
+================
+
+For the sake of simplicity, I will assume for the rest of this document that you
+have added the cyanaudit schema to your search path (See Installation step 6).
+
+* `vw_audit_log`
+
+  This is the primary interface into the log. It has the following columns:
+
+  * recorded - timestamp of action. This column is indexed.
+  * uid - userid of the user performing the action
+  * user_email - email address of user performing the action. 
+  * txid - database transaction ID of this operation. This column is indexed.
+  * description - Textual description of transaction. See "Labe
+  * table_name - Name of table in which the action occurred
+  * column_name - Name of column in which the action occurred
+  * pk_val - Integer PK value of the row that was modified
+  * op - Type of operation ('I', 'U' or 'D' for INSERT, UPDATE or DELETE)
+  * old_value - Value of column before DELETE or UPDATE
+  * new_value - Value of column after INSERT or UPDATE
+
+
+
+License
+=======
+
+Cyan Audit is released under the PostgreSQL license. Please see the accompanying
+LICENSE file for more details.
+
+
+Author
+======
+
+Cyan Audit was written by Moshe Jacobson -- <moshe@neadwerx.com>
+
+Development funded in part by Nead Werx -- <http://www.neadwerx.com>
 
 vim: ft=txt
 
