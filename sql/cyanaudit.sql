@@ -767,6 +767,15 @@ eval { spi_exec_query($ext_q) };
 CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields() returns void as
  $_$
 begin
+    perform *
+       from tb_audit_field
+      where audit_field = 0
+
+    if not found then
+        insert into tb_audit_data_type values (0, '[unknown]');
+        insert into tb_audit_field values (0, '[unknown]','[unknown]', 0, 0, false);
+    end if;
+
     with tt_audit_fields as
     (
         select coalesce(
@@ -835,8 +844,6 @@ alter sequence @extschema@.sq_pk_audit_data_type
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_data_type','');
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_data_type','');
 
-insert into tb_audit_data_type values (0, '[unknown]');
-
 -- tb_audit_field
 create sequence @extschema@.sq_pk_audit_field;
 
@@ -859,7 +866,6 @@ alter sequence @extschema@.sq_pk_audit_field
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_field','');
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_field','');
 
-insert into tb_audit_field values (0, '[unknown]','[unknown]', 0, 0, false);
 
 
 -- tb_audit_transaction_type
@@ -1109,7 +1115,7 @@ begin
                || '    WHEN TAG IN (''ALTER TABLE'', ''CREATE TABLE'', ''DROP TABLE'') '
                || '    EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger(); ';
 
-        execute my_cmd;
+--        execute my_cmd;
     end if;
 end;
  $$;
