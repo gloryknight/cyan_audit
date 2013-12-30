@@ -167,8 +167,8 @@ labels that can be used over and over without copying the actual text onto each
 transaction, so it is very efficient from the perspective of disk usage.
 
 
-Viewing the Logs
-================
+How To Use
+==========
 
 For the sake of simplicity, I will assume for the rest of this document that you
 have added the cyanaudit schema to your search path (See Installation step 6).
@@ -286,6 +286,108 @@ have added the cyanaudit schema to your search path (See Installation step 6).
   Logging can be re-enabled by setting this back to 1 or issuing the `DISCARD
   ALL` command.
 
+
+Log Maintenance
+===============
+
+In order to understand the functionality of the Cyan Audit log maintenance
+scripts, it is first necessary to understand the way the log tables are managed.
+
+When an event is logged, it is inserted into `tb_audit_event`, which is actually
+just an empty parent table. Inheriting this table is another table called
+`tb_audit_event_current`, to which all of the log events are redirected. 
+
+`tb_audit_event_current` lives in your default tablespace, which is usually your
+fastest media, which will not have enough room to let this table grow
+indefinitely. When this table becomes too large, it needs to be re-located into
+your archive table space, which is usually your larger, slower and cheaper
+media. `cyanaudit_log_rotate.pl` can be used to perform this log rotation.
+
+When the current events are rotated into the archive, the table
+`tb_audit_event_current` is renamed to e.g. `tb_audit_event_20131229_0401`,
+where the table name reflects the time the table was rotated. A new
+`tb_audit_event_current` in your default tablespae is then created to receive
+subsequent events.
+
+Under a typical server load, you will want to rotate your audit events on a
+weekly basis. This will eventually create a large number of partitions, one per
+week, dating back as far as you're willing or able to store on your server.
+
+At a certain point, however, you will want to begin deleting old logs to make
+room on your server. The `cyanaudit_dump.pl` script allows you to back up and
+remove logs past a certain age. The backup files are compressed as they are
+created, and they are generally quite small. 
+
+If you want to restore archived logs, for example to do forensics on long lost
+data, or in the case that you've added storage to your server and want to make
+more logs available online, then you can usee the `cyanaudit_restore.pl` script
+to import them back from the file into the database.
+
+Below are more detailed descriptions of the three log maintenance scripts, which
+are automatically installed to your PostgreSQL bin/ directory.
+
+* `cyanaudit_log_rotate.pl`
+
+  This script rotates the current audit events into the archive. It takes only
+  the following parameters, which are optional if the standard PG environment
+  variables are set:
+
+      Usage: cyanaudit_log_rotate.pl [ options ... ]
+      Options:
+        -d db      Connect to given database
+        -h host    Connect to given host
+        -p port    Connect on given port
+        -U user    Connect as given user
+
+* `cyanaudit_dump.pl`
+
+  This script has two functions. The first is to export archived logs to files.
+  The second is to remove archived logs older than a certain age from your
+  database.
+
+  Normally you will use both functions simultaneously for the purposes of
+  exporting old logs and removing them from the database. However, it can also
+  be used to back up the logs you have not yet exported, even if you are not
+  ready to delete them. This will allow you to restore these tables in the event
+  of a database crash, since your regular pg_dump backups will not catch these
+  tables as they are owned by the extension.
+
+      Usage: cyanaudit_dump.pl -m months_to_keep [ options ... ]
+      Options:
+        -d db      Connect to database by given Name
+        -U user    Connect to database as given User
+        -h host    Connect to database on given Host
+        -p port    Connect to database on given Port
+        -a         Back up All audit tables
+        -c         Clobber (overwrite) existing files. Default is to skip these.
+        -r         Remove table from database once it has been archived
+        -z         gzip output file
+        -o dir     Output directory (default current directory)
+
+  If you'd like to use the script to ensure that all of your tables are backed
+  up into files in /var/lib/pgsql/backups, as well as to remove logs over 6
+  months old, you can run it every day as follows:
+  
+        cyanaudit_dump.pl -a -r -m 6 -z -o /var/lib/pgsql/backups
+
+  It is highly recommended to use the -z option in all cases, as the output is
+  extremely large if uncompressed, and also compresses quite well.
+
+* `cyanaudit_restore.pl`
+
+  This script takes a file created by `cyanaudit_dump.pl` and restores it back
+  into the database. 
+
+      Usage: cyanaudit_restore.pl [ options ] file [...]
+      Options:
+        -d db      Connect to given database
+        -h host    Connect to given host
+        -p port    Connect on given port
+        -U user    Connect as given user
+
+  Due to the nature of the way the compresed archive files are stored, it is not
+  possible to give a percentage-based progress indicator when restoring from a
+  compressed archive.
 
 
 License
