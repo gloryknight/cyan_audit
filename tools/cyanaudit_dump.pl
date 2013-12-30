@@ -20,7 +20,7 @@ sub usage
         print "Error: $message\n";
     }
 
-    print "Usage: %0 -m months_to_keep [ options ... ]\n"
+    print "Usage: $0 -m months_to_keep [ options ... ]\n"
         . "Options:\n"
         . "  -d db      Connect to database by given Name\n"
         . "  -U user    Connect to database as given User\n"

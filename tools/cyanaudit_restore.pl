@@ -18,16 +18,12 @@ sub usage($)
     my( $msg ) = @_;
 
     print "Error: $msg\n" if( $msg );
-    print <<__EOF__;
-Usage:
-    $0 [ options ] file [...]
-Options:
-    -U dbuser
-    -d dbname
-    -h dbhost
-    -p dbport
-__EOF__
-
+    print "Usage: $0 [ options ] file [...]\n"
+        . "Options:\n"
+        . "  -d db      Connect to given database\n"
+        . "  -h host    Connect to given host\n"
+        . "  -p port    Connect on given port\n"
+        . "  -U user    Connect as given user\n";
     exit 1;
 }
 

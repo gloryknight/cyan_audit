@@ -20,7 +20,7 @@ sub usage
         print "Error: $message\n";
     }
 
-    print "Usage: %0 [ options ... ]\n"
+    print "Usage: $0 [ options ... ]\n"
         . "Options:\n"
         . "  -d db      Connect to given database\n"
         . "  -h host    Connect to given host\n"
