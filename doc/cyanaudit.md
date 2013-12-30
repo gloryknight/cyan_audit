@@ -60,11 +60,11 @@ Installation
 
 2. Now go into the directory and simply run `make install`. 
 
-   Note: You will have to have pg_config in your path in orderr for this to work.
-   You can see if it is in your path by issuing the command `which pg_config`. If
-   it is not found in your search path, you may need to add it by modifying your
-   login script (e.g. .bashrc) to add your /usr/pgsql-9.3/bin (or equivalent)
-   directory to your `$PATH`.
+   Note: You will have to have `pg_config` in your path in orderr for this to
+   work.  You can see if it is in your path by issuing the command `which
+   pg_config`. If it is not found in your search path, you may need to add it by
+   modifying your login script (e.g. .bashrc) to add your `/usr/pgsql-9.3/bin` (or
+   equivalent) directory to your `$PATH`.
 
 3. Add the necessary configuration directives to your `postgresql.conf`:
 
@@ -143,8 +143,17 @@ happening in that transaction, for example to indicate the module of code that
 made the modification, or to allow the layperson to understand the logs a little
 bit more easily.
 
-To use this feature, your application must call `fn_label_audit_transaction()`
-after any transaction you wish to label:
+To use this feature, your application must call
+`fn_last_label_audit_transaction()` immediately after any transaction you wish
+to label:
+
+    SELECT fn_label_last_audit_transaction('User Logged In');
+
+This will apply the given label to all log entries associated with the last
+logged transaction.
+
+If you are wanting to label a transaction from within that transaction, e.g. in
+a PL/pgSQL function, you can call the `fn_label_audit_transaction()` function:
 
     SELECT fn_label_audit_transaction('User Added');
 
@@ -166,19 +175,116 @@ have added the cyanaudit schema to your search path (See Installation step 6).
 
 * `vw_audit_log`
 
-  This is the primary interface into the log. It has the following columns:
+  This view is the primary interface into the log. It has the following columns:
 
-  * recorded - timestamp of action. This column is indexed.
-  * uid - userid of the user performing the action
-  * user_email - email address of user performing the action. 
-  * txid - database transaction ID of this operation. This column is indexed.
-  * description - Textual description of transaction. See "Labe
-  * table_name - Name of table in which the action occurred
-  * column_name - Name of column in which the action occurred
-  * pk_val - Integer PK value of the row that was modified
-  * op - Type of operation ('I', 'U' or 'D' for INSERT, UPDATE or DELETE)
-  * old_value - Value of column before DELETE or UPDATE
-  * new_value - Value of column after INSERT or UPDATE
+  * `recorded` - timestamp of action. This column is indexed.
+  * `uid` - userid of the user performing the action
+  * `user_email` - email address of user performing the action. 
+  * `txid` - database transaction ID of this operation. This column is indexed.
+  * `description` - Textual description of transaction. See "Labeling
+                    Transactions" above for more information.
+  * `table_name` - Name of table of action. Indexed together with column_name.
+  * `column_name` - Name of column of action. Indexed together with table_name.
+  * `pk_val` - Integer PK value of the row that was modified
+  * `op` - Type of operation ('I', 'U' or 'D' for INSERT, UPDATE or DELETE)
+  * `old_value` - Value of column before DELETE or UPDATE
+  * `new_value` - Value of column after INSERT or UPDATE
+
+  It is most efficient to query the audit log based on the indexed columns.
+  Therefore, restricting by `recorded` , `txid` or `table_name` + `column_name`
+  will return results very quickly, whereas using the other columns for your
+  searches will be quite slow unless you have already well restricted the output
+  set using the indexed columns.
+
+* `vw_audit_transaction_statement`
+
+  This view constructs SQL statements from the data recorded in the log. The
+  reconstructed statements for a transaction are not necessarily the same as the
+  original statements used to effect that transaction's changes, but they
+  produce the same result if executed.
+
+  The view has the following columns:
+
+  * `txid` - Transaction ID. This column is indexed.
+  * `recorded` - When the changes of this statement were originally made
+  * `user_email` - Email of user who made the changes in this transaction
+  * `description` - Textual description of transaction. See "Labeling
+                    Transactions" above for more information.
+  * `query` - The re-constructed query
+
+* `tb_audit_field`
+
+  This table controls the tables & columns that Cyan Audit logs. It is updated
+  automatically whenever you call `fn_update_audit_fields()` (which happens
+  automatically in 9.3 and above whenever any DDL such as a CREATE TABLE is
+  executed).
+
+  This table has the following columns:
+
+  * `audit_field` - This is the PK column of the tb_audit_field table.
+  * `table_name` - table of column being logged
+  * `column_name` - column being logged
+  * `audit_data_type` - Data type of the column.
+  * `table_pk` - audit_field row for this table's PK column.
+  * `active` - boolean indicating whether this column is enabled for logging.
+
+  The only column that has any use to you as the administrator is the `active`
+  boolean.  You can turn on or off logging for a particular column by updating
+  this field. As an example, the following command disables logging for table
+  'foo', column 'bar':
+
+        UPDATE tb_audit_field 
+           SET active = false 
+         WHERE table_name = 'foo' 
+           AND column_name = 'bar';
+
+  When Cyan Audit discovers a new column in your database, it will automatically
+  set `active` to `true` (i.e. it will automatically log the column) unless the
+  following conditions are met:
+
+  1. There is at least one more column of this table already in tb_audit_field
+  2. There is no column of this table in tb_audit_field that has `active = true`
+
+* `fn_label_audit_transaction( label )`
+
+  Please see the section "Labeling Transactions" under "Configuring Your
+  Application" for details on this function.
+
+* `fn_set_audit_uid()`
+
+  Sets the userid for the current session.
+
+  Please see "Passing the User ID" under "Cnofiguring Your Application for more
+  details on this function.
+
+* `fn_get_audit_uid()`
+
+  Returns the userid previously set with `fn_set_audit_uid()`. If none was set,
+  returns 0.
+
+* `fn_get_last_audit_txid()`
+
+  This function returns the txid of the last transaction logged for the current
+  user as indicated by fn_get_audit_uid()
+
+* `fn_undo_transaction( txid )`
+
+  Pass a transaction ID into this function, and it will issue commands to
+  reverse the modifications that were logged for this transaction.
+
+* `fn_undo_last_transaction()`
+  
+  A shortcut for `fn_undo_transaction( fn_get_last_audit_txid() )`
+
+* `cyanaudit.enabled`
+
+  This configuration parameter can be set on a session-by-session basis to
+  disable logging for the current session only:
+
+        SET cyanaudit.enabled = 0;
+
+  Logging can be re-enabled by setting this back to 1 or issuing the `DISCARD
+  ALL` command.
 
 
 
