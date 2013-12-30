@@ -300,8 +300,9 @@ just an empty parent table. Inheriting this table is another table called
 `tb_audit_event_current` lives in your default tablespace, which is usually your
 fastest media, which will not have enough room to let this table grow
 indefinitely. When this table becomes too large, it needs to be re-located into
-your archive table space, which is usually your larger, slower and cheaper
-media. `cyanaudit_log_rotate.pl` can be used to perform this log rotation.
+your archive tablespace (specified by the confiration parameter
+`cyanaudit.archive_tablespace`), which is usually your larger, slower and
+cheaper media. `cyanaudit_log_rotate.pl` is used to perform this log rotation.
 
 When the current events are rotated into the archive, the table
 `tb_audit_event_current` is renamed to e.g. `tb_audit_event_20131229_0401`,
@@ -320,7 +321,7 @@ created, and they are generally quite small.
 
 If you want to restore archived logs, for example to do forensics on long lost
 data, or in the case that you've added storage to your server and want to make
-more logs available online, then you can usee the `cyanaudit_restore.pl` script
+more logs available online, then you can use the `cyanaudit_restore.pl` script
 to import them back from the file into the database.
 
 Below are more detailed descriptions of the three log maintenance scripts, which
@@ -332,12 +333,12 @@ are automatically installed to your PostgreSQL bin/ directory.
   the following parameters, which are optional if the standard PG environment
   variables are set:
 
-      Usage: cyanaudit_log_rotate.pl [ options ... ]
-      Options:
-        -d db      Connect to given database
-        -h host    Connect to given host
-        -p port    Connect on given port
-        -U user    Connect as given user
+        Usage: cyanaudit_log_rotate.pl [ options ... ]
+        Options:
+          -d db      Connect to given database
+          -h host    Connect to given host
+          -p port    Connect on given port
+          -U user    Connect as given user
 
 * `cyanaudit_dump.pl`
 
@@ -349,23 +350,23 @@ are automatically installed to your PostgreSQL bin/ directory.
   exporting old logs and removing them from the database. However, it can also
   be used to back up the logs you have not yet exported, even if you are not
   ready to delete them. This will allow you to restore these tables in the event
-  of a database crash, since your regular pg_dump backups will not catch these
+  of a database crash, since your regular `pg_dump` backups will not catch these
   tables as they are owned by the extension.
 
-      Usage: cyanaudit_dump.pl -m months_to_keep [ options ... ]
-      Options:
-        -d db      Connect to database by given Name
-        -U user    Connect to database as given User
-        -h host    Connect to database on given Host
-        -p port    Connect to database on given Port
-        -a         Back up All audit tables
-        -c         Clobber (overwrite) existing files. Default is to skip these.
-        -r         Remove table from database once it has been archived
-        -z         gzip output file
-        -o dir     Output directory (default current directory)
+        Usage: cyanaudit_dump.pl -m months_to_keep [ options ... ]
+        Options:
+          -d db      Connect to database by given Name
+          -U user    Connect to database as given User
+          -h host    Connect to database on given Host
+          -p port    Connect to database on given Port
+          -a         Back up All audit tables
+          -c         Clobber (overwrite) existing files. Default is to skip these.
+          -r         Remove table from database once it has been archived
+          -z         gzip output file
+          -o dir     Output directory (default current directory)
 
   If you'd like to use the script to ensure that all of your tables are backed
-  up into files in /var/lib/pgsql/backups, as well as to remove logs over 6
+  up into files in `/var/lib/pgsql/backups`, as well as to remove logs over 6
   months old, you can run it every day as follows:
   
         cyanaudit_dump.pl -a -r -m 6 -z -o /var/lib/pgsql/backups
@@ -378,12 +379,12 @@ are automatically installed to your PostgreSQL bin/ directory.
   This script takes a file created by `cyanaudit_dump.pl` and restores it back
   into the database. 
 
-      Usage: cyanaudit_restore.pl [ options ] file [...]
-      Options:
-        -d db      Connect to given database
-        -h host    Connect to given host
-        -p port    Connect on given port
-        -U user    Connect as given user
+        Usage: cyanaudit_restore.pl [ options ] file [...]
+        Options:
+          -d db      Connect to given database
+          -h host    Connect to given host
+          -p port    Connect on given port
+          -U user    Connect as given user
 
   Due to the nature of the way the compresed archive files are stored, it is not
   possible to give a percentage-based progress indicator when restoring from a
