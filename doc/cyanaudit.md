@@ -1,7 +1,7 @@
 ![Cyan Audit Logo](https://db.tt/IrZ3wQpr)
 
-Cyan Audit 0.9.1
-================
+Cyan Audit
+==========
 
 Synopsis
 --------
@@ -56,7 +56,7 @@ Installation
 
 1. Unpack the source files into a directory in your file system:
 
-        # tar zxvf cyanaudit-0.9.1.tar.gz
+        # tar zxvf cyanaudit-X.X.X.tar.gz
 
 2. Now go into the directory and simply run `make install`. 
 
@@ -401,7 +401,7 @@ LICENSE file for more details.
 Author
 ======
 
-Cyan Audit was written by Moshe Jacobson -- <moshe@neadwerx.com>
+Cyan Audit is written and maintained by Moshe Jacobson -- <moshe@neadwerx.com>
 
 Development funded in part by Nead Werx -- <http://www.neadwerx.com>
 

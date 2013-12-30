@@ -10,7 +10,7 @@ DATA         = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION)--$(EXTVER
 PKG_SQL      = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION).sql
 EXTRA_CLEAN  = sql/$(EXTENSION)--$(EXTVERSION).sql
 
-PKGFILES     = cyanaudit.control LICENSE Makefile META.json \
+PKGFILES     = cyanaudit.control LICENSE README Makefile META.json \
                $(PKG_SQL) $(DOCS) $(SCRIPTS)
 
 PKGNAME      = $(EXTENSION)-$(EXTVERSION)
