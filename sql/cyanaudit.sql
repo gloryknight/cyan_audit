@@ -1095,13 +1095,13 @@ declare
     my_version  integer[];
     my_cmd      text;
 begin
-    -- If on PostgreSQL 9.3 or above, add a DDL trigger to run
+    -- If on PostgreSQL 9.3.3 or above, add a DDL trigger to run
     -- fn_update_audit_fields() automatically. Use EXECUTE to avoid syntax 
     -- errors during installation on older versions.
 
     my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
 
-    if my_version >= array[9,3,0]::integer[] then
+    if my_version >= array[9,3,3]::integer[] then
         my_cmd := 'CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger() '
                || 'returns event_trigger '
                || 'language plpgsql as '
