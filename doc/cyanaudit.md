@@ -1,7 +1,7 @@
 ![Cyan Audit Logo](cyanaudit_logo.png)
 
-Cyan Audit 0.4
-==============
+Cyan Audit 0.9.0
+================
 
 Synopsis
 --------
@@ -56,7 +56,7 @@ Installation
 
 1. Unpack the source files into a directory in your file system:
 
-        # tar zxvf cyanaudit-0.4.tar.gz
+        # tar zxvf cyanaudit-0.9.0.tar.gz
 
 2. Now go into the directory and simply run `make install`. 
 

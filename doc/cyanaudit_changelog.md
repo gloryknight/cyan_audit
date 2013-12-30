@@ -18,3 +18,7 @@ Moved log rotation function to an external Perl script to avoid race condition
 Fixed bug with audit_event sequence going out of range
 Added DDL trigger for Postgres 9.3 and above
 
+0.4 -> 0.9.0
+------------
+Made Cyan Audit ready for PGXN
+Changed to semantic version number
