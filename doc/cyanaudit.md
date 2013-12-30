@@ -1,6 +1,6 @@
 ![Cyan Audit Logo](cyanaudit_logo.png)
 
-Cyan Audit 0.9.0
+Cyan Audit 0.9.1
 ================
 
 Synopsis
@@ -45,7 +45,7 @@ Requirements & Limitations
 --------------------------
 
 * Requires PostgreSQL 9.1.7 or above.
-* Automatic DDL detection requires PostgreSQL 9.3.0 or above.
+* Automatic DDL detection requires PostgreSQL 9.3.3 or above.
 * Requires languages `plpgsql` and `plperl`.
 * Currently only tables in schema `public` can be logged.
 * Currently only tables having a single-column PK of type integer can be logged.
@@ -56,7 +56,7 @@ Installation
 
 1. Unpack the source files into a directory in your file system:
 
-        # tar zxvf cyanaudit-0.9.0.tar.gz
+        # tar zxvf cyanaudit-0.9.1.tar.gz
 
 2. Now go into the directory and simply run `make install`. 
 
@@ -216,7 +216,7 @@ have added the cyanaudit schema to your search path (See Installation step 6).
 
   This table controls the tables & columns that Cyan Audit logs. It is updated
   automatically whenever you call `fn_update_audit_fields()` (which happens
-  automatically in 9.3 and above whenever any DDL such as a CREATE TABLE is
+  automatically in 9.3.3 and above whenever any DDL such as a CREATE TABLE is
   executed).
 
   This table has the following columns:
