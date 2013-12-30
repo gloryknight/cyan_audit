@@ -78,9 +78,11 @@ print "Cyan Audit tablespace is '$tablespace'\n";
 my @time = localtime;
 
 my $table_name = sprintf "tb_audit_event_%04d%02d%02d_%02d%02d",
-                         $time[5] + 1900, $time[4], $time[3], $time[2], $time[1];
-
-
+                         $time[5] + 1900, 
+                         $time[4] + 1, 
+                         $time[3], 
+                         $time[2], 
+                         $time[1];
 
 ### Verify that we actually have work to do
 
@@ -134,7 +136,7 @@ $q = "grant update (audit_transaction_type) "
    . " on $schema.tb_audit_event_current to public ";
 $handle->do($q) or die "Could not grant audit event table permissions\n";
 
-$q = "revoke all privileges on $schema.$table_name from public"
+$q = "revoke all privileges on $schema.$table_name from public";
 $handle->do($q) or die "Could not revoke public access to old audit table\n";
 
 print "Done.\n";
