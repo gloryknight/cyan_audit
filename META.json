@@ -2,14 +2,14 @@
     "name": "CyanAudit",
     "abstract": "DML logging tool for PostgreSQL",
     "description": "Cyan Audit provides in-database logging of all DML activity on a column-by-column basis",
-    "version": "0.9.0",
+    "version": "0.9.1",
     "maintainer": "Moshe Jacobson <moshe@neadwerx.com>",
     "license": "postgresql",
     "provides": {
         "cyanaudit": {
             "file": "sql/cyanaudit.sql",
             "docfile": "doc/cyanaudit.md",
-            "version": "0.9.0",
+            "version": "0.9.1",
             "abstract": "Cyan Audit core extension" 
         }
     },
