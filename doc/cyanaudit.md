@@ -1,4 +1,4 @@
-![Cyan Audit Logo](cyanaudit_logo.png)
+![Cyan Audit Logo](https://db.tt/IrZ3wQpr)
 
 Cyan Audit 0.9.1
 ================
