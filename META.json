@@ -20,16 +20,18 @@
     "tags": [ 
         "audit",
         "auditing",
-        "logging",
         "audit log",
-        "logger",
-        "log",
-        "cyan audit",
+        "audit logging",
         "audit trail",
+        "cyan audit",
+        "cyanaudit",
         "DML log",
-        "trigger-based logging",
-        "auditing",
-        "history"
+        "forensics",
+        "forensic logging",
+        "logger",
+        "logging",
+        "transaction history",
+        "trigger-based logging"
     ],
     "prereqs": {
         "runtime": {

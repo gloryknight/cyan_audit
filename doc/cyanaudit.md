@@ -1,16 +1,13 @@
 ![Cyan Audit Logo](https://db.tt/IrZ3wQpr)
 
-Cyan Audit
-==========
-
 Synopsis
---------
+========
 
-Cyan Audit is a powerful extension for in-database logging of DDL.
+Cyan Audit is a powerful PostgreSQL extension for in-database logging of DDL.
 
 
 Introduction
-------------
+============
 
 How do you keep track of who modified the contents of your database?
 
@@ -42,7 +39,7 @@ Does that sound interesting? Good, let's get started.
 
 
 Requirements & Limitations
---------------------------
+==========================
 
 * Requires PostgreSQL 9.1.7 or above.
 * Automatic DDL detection requires PostgreSQL 9.3.3 or above.
@@ -52,7 +49,7 @@ Requirements & Limitations
 
 
 Installation
-------------
+============
 
 1. Unpack the source files into a directory in your file system:
 
