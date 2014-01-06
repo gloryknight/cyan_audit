@@ -1,7 +1,5 @@
 Add support for logging schemas other than public
 Add checking to ensure no logging of auditlog schema
-Package for pgxn
-Correctly handle missing settings in postgresql.conf
-Branding
-Custom variable classes should use branded name, not schema name.
-Rewrite tablespaces script in perl to auto-detect table space
+Fix usage message on all tools when connect info is incorrect
+Make -m option to cyanaudit_dump optional
+Set config variables on database instead of in postgresql.conf

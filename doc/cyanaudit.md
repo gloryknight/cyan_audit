@@ -41,8 +41,9 @@ Does that sound interesting? Good, let's get started.
 Requirements & Limitations
 ==========================
 
-* Requires PostgreSQL 9.1.7 or above.
-* Automatic DDL detection requires PostgreSQL 9.3.3 or above.
+* PostgreSQL 9.1.7 or above is required for basic functionality.
+* PostgreSQL 9.3.3 or above is required for auto-detection of DDL and automatic
+  modification of configuration.
 * Requires languages `plpgsql` and `plperl`.
 * Currently only tables in schema `public` can be logged.
 * Currently only tables having a single-column PK of type integer can be logged.
@@ -57,7 +58,7 @@ Installation
 
 2. Now go into the directory and simply run `make install`. 
 
-   Note: You will have to have `pg_config` in your path in orderr for this to
+   Note: You will have to have `pg_config` in your path in order for this to
    work.  You can see if it is in your path by issuing the command `which
    pg_config`. If it is not found in your search path, you may need to add it by
    modifying your login script (e.g. .bashrc) to add your `/usr/pgsql-9.3/bin` (or

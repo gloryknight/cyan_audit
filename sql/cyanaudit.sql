@@ -37,11 +37,16 @@ begin
     end if;
 
     if (select count(*) from pg_language where lanname = 'plperl') = 0 then
-        create language plperl;
-        alter extension cyanaudit drop language plperl;
-        alter extension cyanaudit drop function plperl_call_handler();
-        alter extension cyanaudit drop function plperl_inline_handler(internal);
-        alter extension cyanaudit drop function plperl_validator(oid);
+        begin
+            create language plperl;
+            alter extension cyanaudit drop language plperl;
+            alter extension cyanaudit drop function plperl_call_handler();
+            alter extension cyanaudit drop function plperl_inline_handler(internal);
+            alter extension cyanaudit drop function plperl_validator(oid);
+        exception
+            when undefined_object then
+                 raise exception 'Cyan Audit requires lanugage plperl.';
+        end;
     end if;
 
     if '@extschema@' = 'public' then
@@ -50,6 +55,7 @@ begin
 
     my_missing_config := '';
 
+    -- FIXME
     if my_version < array[9,2,0]::integer[] then
         begin
             if current_setting('cyanaudit.uid') != '-1' then
@@ -159,18 +165,41 @@ returns varchar as
 declare
     my_email    varchar;
     my_query    varchar;
+    my_user_table_uid_col       varchar;
+    my_user_table               varchar;
+    my_user_table_email_col  varchar;
 begin
-    my_query := 'select ' || current_setting('cyanaudit.user_table_email_col')
-             || '  from ' || current_setting('cyanaudit.user_table')
-             || ' where ' || current_setting('cyanaudit.user_table_uid_col')
+    select current_setting('cyanaudit.user_table'),
+           current_setting('cyanaudit.user_table_uid_col'),
+           current_setting('cyanaudit.user_table_email_col')
+      into my_user_table,
+           my_user_table_uid_col,
+           my_user_table_email_col;
+
+    if my_user_table            = '' OR
+       my_user_table_uid_col    = '' OR
+       my_user_table_email_col  = ''
+    then
+        return null;
+    end if;
+
+    my_query := 'select ' || my_user_table_email_col
+             || '  from ' || my_user_table
+             || ' where ' || my_user_table_uid_col
                           || ' = ' || in_uid;
     execute my_query
        into my_email;
 
     return my_email;
 exception
-    when undefined_object
-    then return null;
+    when undefined_object then 
+         return null;
+    when undefined_table then 
+         raise notice 'Cyan Audit: Invalid user_table';
+         return null;
+    when undefined_column then 
+         raise notice 'Cyan Audit: Invalid user_table_uid_col or user_table_email_col';
+         return null;
 end
  $_$
     language plpgsql stable strict;
@@ -183,20 +212,42 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid_by_username
 returns integer as
  $_$
 declare
-    my_uid      varchar;
-    my_query    varchar;
+    my_uid                      varchar;
+    my_query                    varchar;
+    my_user_table_uid_col       varchar;
+    my_user_table               varchar;
+    my_user_table_username_col  varchar;
 begin
-    my_query := 'select ' || current_setting('cyanaudit.user_table_uid_col')
-             || '  from ' || current_setting('cyanaudit.user_table')
-             || ' where ' || current_setting('cyanaudit.user_table_username_col')
+    select current_setting('cyanaudit.user_table'),
+           current_setting('cyanaudit.user_table_uid_col'),
+           current_setting('cyanaudit.user_table_username_col')
+      into my_user_table,
+           my_user_table_uid_col,
+           my_user_table_username_col;
+
+    if my_user_table                = ''
+       my_user_table_uid_col        = ''
+       my_user_table_username_col   = ''
+    then
+        return null;
+    end if;
+
+    my_query := 'select ' || my_user_table_uid_col
+             || '  from ' || my_user_table
+             || ' where ' || my_user_table_username_col
                           || ' = ''' || in_username || '''';
     execute my_query
        into my_uid;
 
     return my_uid;
 exception
-    when undefined_object
-    then return null;
+    when undefined_object then 
+         return null;
+    when undefined_table then 
+         raise notice 'Cyan Audit: Invalid user_table';
+         return null;
+    when undefined_column then 
+         raise notice 'Cyan Audit: Invalid user_table_uid_col or user_table_username_col';
 end
  $_$
     language plpgsql stable strict;
@@ -741,6 +792,9 @@ EXCEPTION
          return NEW;
     WHEN undefined_column THEN
          raise notice 'Undefined column. Please run fn_update_audit_fields().';
+         return NEW;
+    WHEN undefined_object THEN
+         raise notice 'Cyan Audit configuration invalid. Logging disabled.';
          return NEW;
 END
  \$_\$
