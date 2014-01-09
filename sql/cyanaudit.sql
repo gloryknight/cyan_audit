@@ -96,7 +96,7 @@ end;
  $$;
 
 -- fn_set_audit_uid
-CREATE OR REPLACE FUNCTION fn_set_audit_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_set_audit_uid
 (
     in_uid   integer
 )
@@ -110,7 +110,7 @@ end;
 
 
 -- fn_get_audit_uid
-CREATE OR REPLACE FUNCTION fn_get_audit_uid() returns integer as
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid() returns integer as
  $_$
 declare
     my_uid    integer;
