@@ -66,7 +66,7 @@ my $schema_q = <<__EOF__;
       FROM pg_extension e
 INNER JOIN pg_namespace n
         ON n.oid = e.extnamespace
-     WHERE e.extname = 'auditlog'
+     WHERE e.extname = 'cyanaudit'
 __EOF__
 
 my $schema_sth = $handle->prepare( $schema_q );
