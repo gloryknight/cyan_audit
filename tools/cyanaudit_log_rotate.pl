@@ -108,7 +108,7 @@ print "Done\n";
 print "Creating new $schema.tb_audit_event_current... ";
 
 $q = "CREATE TABLE $schema.tb_audit_event_current() "
-   . " INHERITS ($schema.tb_audit_event) TABLESPACE $tablespace ";
+   . " INHERITS ($schema.tb_audit_event) ";
 $handle->do($q) or die "Could not create new current audit event table\n";
 
 $handle->do("COMMIT");
@@ -166,15 +166,15 @@ print "Done\n";
 print "Creating indexes on new table... ";
 
 $q = "create index tb_audit_event_current_txid_idx "
-   . " on $schema.tb_audit_event_current(txid) tablespace $tablespace ";
+   . " on $schema.tb_audit_event_current(txid) ";
 $handle->do($q) or die "Could not create new txid index\n";
 
 $q = "create index tb_audit_event_current_recorded_idx "
-   . " on $schema.tb_audit_event_current(recorded) tablespace $tablespace ";
+   . " on $schema.tb_audit_event_current(recorded) ";
 $handle->do($q) or die "Could not create new recorded index\n";
 
 $q = "create index tb_audit_event_current_audit_field_idx "
-   . " on $schema.tb_audit_event_current(audit_field) tablespace $tablespace ";
+   . " on $schema.tb_audit_event_current(audit_field) ";
 $handle->do($q) or die "Could not create new audit_field index\n";
 
 print "Done\n";
@@ -210,3 +210,31 @@ $handle->do($q) or die "Could not set range constraints on new audit table\n";
 $handle->do("commit");
 
 print "Done\n";
+
+
+### Update old table's tablespace
+
+print "Updating tablespace of archived table... ";
+
+$q = "alter table $schema.${table_name} set tablespace $tablespace ";
+$handle->do($q) or die "Could not update tablespace of $table_name\n";
+
+print "Done.\n";
+
+print "Updating tablespace of archived table's indexes... ";
+
+$q = "alter index $schema.${table_name}_txid_idx "
+   . "  set tablespace $tablespace ";
+$handle->do($q) or die "Could not set tablespace of txid index\n";
+
+$q = "alter index $schema.${table_name}_recorded_idx "
+   . "  set tablespace $tablespace ";
+$handle->do($q) or die "Could not set tablespace of recorded index\n";
+
+$q = "alter index $schema.${table_name}_audit_field_idx "
+   . "  set tablespace $tablespace ";
+$handle->do($q) or die "Could not set tablespace of audit_field index\n";
+
+print "Done\n";
+
+
