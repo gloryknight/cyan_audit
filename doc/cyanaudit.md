@@ -64,17 +64,26 @@ Installation
    modifying your login script (e.g. .bashrc) to add your `/usr/pgsql-9.3/bin` (or
    equivalent) directory to your `$PATH`.
 
-3. Add the necessary configuration directives to your `postgresql.conf`:
+3. Configure custom_variable_classes in `postgresql.conf` (Only for PostgreSQL 9.1):
 
-        custom_variable_classes = 'cyanaudit'            # Only for 9.1
-        cyanaudit.user_table = 'tb_entity'               # Your users table
-        cyanaudit.user_table_uid_col = 'entity'          # UserID column
-        cyanaudit.user_table_email_col = 'email_address' # Email column
-        cyanaudit.user_table_username_col = 'username'   # Username column
-        cyanaudit.archive_tablespace = 'pg_default'      # Tablespace for archives
-        cyanaudit.uid = -1                               # Do not modify
-        cyanaudit.last_txid = 0                          # Do not modify
-        cyanaudit.enabled = 1                            # Do not modify
+        custom_variable_classes = 'cyanaudit'
+
+4. Log into your database as user `postgres` and create the schema and extension:
+
+        mydb=# CREATE SCHEMA cyanaudit;
+        mydb=# CREATE EXTENSION cyanaudit SCHEMA cyanaudit;
+
+5. Configure database-specific settings (optional):
+
+        alter database mydb set cyanaudit.archive_tablespace = 'big_slow_drive';
+        alter database mydb set cyanaudit.user_table = 'tb_entity';
+        alter database mydb set cyanaudit.user_table_uid_col = 'entity';
+        alter database mydb set cyanaudit.user_table_email_col = 'email_address';
+        alter database mydb set cyanaudit.user_table_username_col = 'username';
+
+   The `archive_tablespace` setting is the name of the tablespace to which you
+   would like your logs to be archived when they are rotated. This allows you to
+   put your older logs on cheaper, slower media than that of your main database.
 
    The `user_table`, `user_table_uid_col` and `user_table_email_col` settings
    allow Cyan Audit to display the userid and email of your users when you view
@@ -84,32 +93,32 @@ Installation
    userid from your application to a user in your database cluster. For this to
    work, your database cluster usernames must match those of your application.
 
-   The `archive_tablespace` setting is the name of the tablespace to which you
-   would like your logs to be archived when they are rotated. This allows you to
-   put your older logs on cheaper, slower media than that of your main database.
+6. Force all sessions to reconnect and pick up the database config settings (optional):
 
-4. Log into your database as user `postgres` and create the schema and extension:
+        select pg_terminate_backend(pid) 
+          from pg_stat_activity 
+         where pid != pg_backend_pid();
 
-        mydb=# CREATE SCHEMA cyanaudit;
-        mydb=# CREATE EXTENSION cyanaudit SCHEMA cyanaudit;
-
-5. Instruct Cyan Audit to update its list of tables & columns in your database:
+7. Instruct Cyan Audit to catalog all tables & columns in your database, and
+   install the logging trigger onto all tables:
 
         mydb=# SELECT cyanaudit.fn_update_audit_fields();
 
-   This will automatically turn on logging for all columns of all tables having
-   a primary key column.
+   **WARNING**: This function will hold an exclusive lock on all of your tables
+   until the function returns. On a test database with about 2500 columns, this
+   took 20 seconds. Please make sure you run this at a time when it is
+   acceptable for your tables to be locked for up to a minute.
 
-6. (Optional) Add the Cyan Audit schema to your search path:
+8. (Optional) Add the Cyan Audit schema to your search path:
 
         mydb=# ALTER DATABASE mydb SET search_path = 'public, cyanaudit';
 
    This will keep you from having to preceed every relation and function in this
    extension with `cyanaudit.`.
 
-At this point, logging should be turned on. Perform some DML (INSERT, UPDATE,
-DELETE) and then do `select * from cyanaudit.vw_audit_log` and see if your
-changes have been logged.
+At this point, logging should be turned on for all supported tables. Perform
+some DML (INSERT, UPDATE, DELETE) and then do `select * from
+cyanaudit.vw_audit_log` and see if your changes have been logged.
 
 
 Configuring Your Application
@@ -165,11 +174,18 @@ labels that can be used over and over without copying the actual text onto each
 transaction, so it is very efficient from the perspective of disk usage.
 
 
-How To Use
-==========
+Database Objects
+================
+
+Following is a list of Cyan Audit's views, tables and functions of interest to
+the user.
 
 For the sake of simplicity, I will assume for the rest of this document that you
-have added the cyanaudit schema to your search path (See Installation step 6).
+have added the cyanaudit schema to your search path (See Installation Step 8).
+
+
+Views
+-----
 
 * `vw_audit_log`
 
@@ -210,6 +226,10 @@ have added the cyanaudit schema to your search path (See Installation step 6).
                     Transactions" above for more information.
   * `query` - The re-constructed query
 
+
+Tables
+------
+
 * `tb_audit_field`
 
   This table controls the tables & columns that Cyan Audit logs. It is updated
@@ -242,6 +262,10 @@ have added the cyanaudit schema to your search path (See Installation step 6).
 
   1. There is at least one more column of this table already in tb_audit_field
   2. There is no column of this table in tb_audit_field that has `active = true`
+
+
+Functions
+---------
 
 * `fn_label_audit_transaction( label )`
 
@@ -288,6 +312,9 @@ have added the cyanaudit schema to your search path (See Installation step 6).
 Log Maintenance
 ===============
 
+Log Storage Overview
+--------------------
+
 In order to understand the functionality of the Cyan Audit log maintenance
 scripts, it is first necessary to understand the way the log tables are managed.
 
@@ -325,6 +352,10 @@ to import them back from the file into the database.
 Below are more detailed descriptions of the three log maintenance scripts, which
 are automatically installed to your PostgreSQL bin/ directory.
 
+
+Log Maintenance Scripts
+-----------------------
+
 * `cyanaudit_log_rotate.pl`
 
   This script rotates the current audit events into the archive. It takes only
@@ -337,6 +368,11 @@ are automatically installed to your PostgreSQL bin/ directory.
           -h host    Connect to given host
           -p port    Connect on given port
           -U user    Connect as given user
+
+  To run this script every Sunday at midnight, you would create the following
+  entry in your crontab (change values and paths as appropriate):
+
+        0 0 * * *   /usr/pgsql-9.3/bin/cyanaudit_log_rotate.pl -U postgres -d mydb
 
 * `cyanaudit_dump.pl`
 
@@ -365,9 +401,9 @@ are automatically installed to your PostgreSQL bin/ directory.
 
   If you'd like to use the script to ensure that all of your tables are backed
   up into files in `/var/lib/pgsql/backups`, as well as to remove logs over 6
-  months old, you can run it every day as follows:
+  months old, you can run it every day with a crontab entry as follows:
   
-        cyanaudit_dump.pl -a -r -m 6 -z -o /var/lib/pgsql/backups
+        0 0 * * *   /usr/pgsql-9.3/bin/cyanaudit_dump.pl -U postgres -d mydb -a -r -m 6 -z -o /var/lib/pgsql/backups
 
   It is highly recommended to use the -z option in all cases, as the output is
   extremely large if uncompressed, and also compresses quite well.
@@ -389,20 +425,19 @@ are automatically installed to your PostgreSQL bin/ directory.
   compressed archive.
 
 
+About
+=====
+
 License
-=======
+-------
 
 Cyan Audit is released under the PostgreSQL license. Please see the accompanying
 LICENSE file for more details.
 
 
 Author
-======
+------
 
 Cyan Audit is written and maintained by Moshe Jacobson -- <moshe@neadwerx.com>
 
-Development funded in part by Nead Werx -- <http://www.neadwerx.com>
-
-vim: ft=txt
-
-
+Development funded in part by Nead Werx, Inc. -- <http://www.neadwerx.com>

@@ -27,3 +27,16 @@
 --------------
 - Do not install event trigger on PostgreSQL 9.3.2 or below, as it is not
   handled properly by pg_dump.
+
+0.9.1 -> 0.9.2
+--------------
+- Fixed cyanaudit_log_rotate.pl to correctly move archived table to
+  archive_tablespace and create new table in pg_default tablespace.
+- Fixed two functions that were being created in public schema instead of
+  extensions's schema.
+- Configuration parameters are now stored on the database instead of in
+  postgresql.conf. After upgrade, you may remove the cyanaudit.* config
+  parameters from postgresql.conf. However, for PostgreSQL 9.1, you must retain
+  the `custom_variable_classes = cyanaudit` setting.
+
+

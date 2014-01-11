@@ -29,13 +29,16 @@ declare
     my_missing_config   varchar;
     my_value            varchar;
     my_version          integer[];
+    my_command          varchar;
 begin
     my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
 
+    -- Verify minimum version
     if my_version < array[9,1,7]::integer[] then
         raise exception 'Cyan Audit requires PostgreSQL 9.1.7 or above';
     end if;
 
+    -- Install pl/perl if necessary
     if (select count(*) from pg_language where lanname = 'plperl') = 0 then
         begin
             create language plperl;
@@ -49,49 +52,50 @@ begin
         end;
     end if;
 
+    -- Make sure we are installing to a non-public schema
     if '@extschema@' = 'public' then
         raise exception 'Must install to schema other than public, e.g. cyanaudit';
     end if;
 
     my_missing_config := '';
 
-    -- FIXME
+    -- If version < 9.2.0, verify custom_variable_classes is correctly set
     if my_version < array[9,2,0]::integer[] then
         begin
-            if current_setting('cyanaudit.uid') != '-1' then
-                raise exception undefined_object;
+            if not current_setting('custom_variable_classes') ~ '\mcyanaudit\M' then
+                raise exception 'custom_variable_classes must contain ''cyanaudit''';
             end if;
         exception
             when undefined_object
-            then my_missing_config := my_missing_config
-                                   || E'cyanaudit.uid = -1\n';
+            then raise exception 'missing custom_variable_classes = ''cyanaudit'' in postgresql.conf';
         end;
     end if;
           
-    begin
-        if current_setting('cyanaudit.last_txid') != '0' then
-            raise exception undefined_object;
-        end if;
-    exception
-        when undefined_object
-        then my_missing_config := my_missing_config
-                               || E'cyanaudit.last_txid = 0\n';
-    end;
-          
-    begin
-        if current_setting('cyanaudit.enabled') != '1' then
-            raise exception undefined_object;
-        end if;
-    exception
-        when undefined_object
-        then my_missing_config := my_missing_config
-                               || E'cyanaudit.enabled = 1\n';
-    end;
-          
-    if my_missing_config != '' then
-        raise exception E'You are missing the following mininmum configuration in postgresql.conf:\n%',
-            my_missing_config;
-    end if;
+    -- Set default values for configuration parameters
+    my_command := 'alter database ' || current_database() 
+               || ' set cyanaudit.enabled = 1';
+    execute my_command;
+    my_command := 'alter database ' || current_database() 
+               || ' set cyanaudit.uid = -1';
+    execute my_command;
+    my_command := 'alter database ' || current_database() 
+               || ' set cyanaudit.last_txid = 0';
+    execute my_command;
+    my_command := 'alter database ' || current_database() 
+               || ' set cyanaudit.archive_tablespace = pg_default';
+    execute my_command;
+    my_command := 'alter database ' || current_database() 
+               || ' set cyanaudit.user_table = '''' ';
+    execute my_command;
+    my_command := 'alter database ' || current_database() 
+               || ' set cyanaudit.user_table_uid_col = '''' ';
+    execute my_command;
+    my_command := 'alter database ' || current_database() 
+               || ' set cyanaudit.user_table_email_col = '''' ';
+    execute my_command;
+    my_command := 'alter database ' || current_database() 
+               || ' set cyanaudit.user_table_username_col = '''' ';
+    execute my_command;
 end;
  $$;
 
@@ -163,11 +167,11 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_get_email_by_audit_uid
 returns varchar as
  $_$
 declare
-    my_email    varchar;
-    my_query    varchar;
-    my_user_table_uid_col       varchar;
-    my_user_table               varchar;
-    my_user_table_email_col  varchar;
+    my_email                varchar;
+    my_query                varchar;
+    my_user_table_uid_col   varchar;
+    my_user_table           varchar;
+    my_user_table_email_col varchar;
 begin
     select current_setting('cyanaudit.user_table'),
            current_setting('cyanaudit.user_table_uid_col'),
@@ -225,8 +229,8 @@ begin
            my_user_table_uid_col,
            my_user_table_username_col;
 
-    if my_user_table                = ''
-       my_user_table_uid_col        = ''
+    if my_user_table                = '' OR
+       my_user_table_uid_col        = '' OR
        my_user_table_username_col   = ''
     then
         return null;
