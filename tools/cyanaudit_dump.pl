@@ -45,9 +45,9 @@ unless( defined $months )
     usage("Must specify a number of months of audit data to keep ( -m )");
 }
 
-unless( $months =~ /^\d+$/ and $months >= 0 and $months < 120 )
+unless( $months =~ /^\d+$/ and $months >= 0 and $months <= 120 )
 {
-    usage("Invalid number of months '$months' specified");
+    usage("Invalid number of months '$months' specified. Must be <= 120");
 }
 
 my $outdir = '.';
