@@ -372,7 +372,7 @@ Log Maintenance Scripts
   To run this script every Sunday at midnight, you would create the following
   entry in your crontab (change values and paths as appropriate):
 
-        0 0 * * *   /usr/pgsql-9.3/bin/cyanaudit_log_rotate.pl -U postgres -d mydb
+        0 0 * * 0   /usr/pgsql-9.3/bin/cyanaudit_log_rotate.pl -U postgres -d mydb
 
 * `cyanaudit_dump.pl`
 

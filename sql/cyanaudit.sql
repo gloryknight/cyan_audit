@@ -1020,18 +1020,18 @@ CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
           when ae.row_op = 'I' then
                'INSERT INTO ' || af.table_name || ' ('
                || array_to_string(array_agg('"'||af.column_name||'"'), ',') 
-               || ') values ('
+               || ') VALUES ('
                || array_to_string(array_agg(coalesce(
                     quote_literal(ae.new_value)||'::'||adt.name, 'NULL'
                   )), ',') ||');'
           when ae.row_op = 'U' then
-               'UPDATE ' || af.table_name || ' set '
+               'UPDATE ' || af.table_name || ' SET '
                || array_to_string(array_agg(af.column_name||' = '||coalesce(
                     quote_literal(ae.new_value)||'::'||adt.name, 'NULL'
-                  )), ', ') || ' where ' || afpk.column_name || ' = ' 
+                  )), ', ') || ' WHERE ' || afpk.column_name || ' = ' 
                || quote_literal(ae.row_pk_val) || '::' || adtpk.name || ';'
           when ae.row_op = 'D' then
-               'DELETE FROM ' || af.table_name || ' where ' || afpk.column_name
+               'DELETE FROM ' || af.table_name || ' WHERE ' || afpk.column_name
                ||' = '||quote_literal(ae.row_pk_val)||'::'||adtpk.name||';'
           end)::varchar as query
      from @extschema@.tb_audit_event ae
