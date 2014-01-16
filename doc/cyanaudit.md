@@ -111,7 +111,7 @@ Installation
 
 8. (Optional) Add the Cyan Audit schema to your search path:
 
-        mydb=# ALTER DATABASE mydb SET search_path = 'public, cyanaudit';
+        mydb=# ALTER DATABASE mydb SET search_path = public, cyanaudit;
 
    This will keep you from having to preceed every relation and function in this
    extension with `cyanaudit.`.
@@ -440,4 +440,4 @@ Author
 
 Cyan Audit is written and maintained by Moshe Jacobson -- <moshe@neadwerx.com>
 
-Development funded in part by Nead Werx, Inc. -- <http://www.neadwerx.com>
+Development sponsored by Nead Werx, Inc. -- <http://www.neadwerx.com>
