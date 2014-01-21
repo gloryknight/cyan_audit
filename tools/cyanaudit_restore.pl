@@ -338,12 +338,6 @@ __EOF__
 
     $handle->do( "ALTER EXTENSION cyanaudit ADD TABLE ${schema}.${table_name}" )
         or die( "Could not add table ${table_name} to cyanaudit extension" );
-    $handle->do( "ALTER EXTENSION cyanaudit ADD INDEX ${schema}.${table_name}_audit_field_idx" )
-        or die( "Could not associate audit_field index with cyanaudit extension" );
-    $handle->do( "ALTER EXTENSION cyanaudit ADD INDEX ${schema}.${table_name}_recorded_idx" )
-        or die( "Could not associate recorded index with cyanaudit extension" );
-    $handle->do( "ALTER EXTENSION cyanaudit ADD INDEX ${schema}.${table_name}_txid_idx" )
-        or die( "Could not associate txid index with cyanaudit extension" );
 
     $handle->do( "COMMIT" ) or die( "Could not commit restore operation\n" );
     my $end_time = microtime();
