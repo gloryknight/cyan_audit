@@ -155,7 +155,9 @@ foreach my $table_row (@$table_rows)
 
     my $exporting_msg = "Exporting $schema.$table ($size)";
 
-    print "$exporting_msg: Preparing... ";
+    print "$exporting_msg: "
+    
+    print " Preparing... " if( -t STDIN );
 
     my $open_str = "> $outdir/$table.csv";
 
@@ -226,9 +228,12 @@ foreach my $table_row (@$table_rows)
         {
             (my $current_audit_event = $row) =~ s/,.*$//s;
 
-            printf "\r$exporting_msg: %0.1f%% complete... ",
-                100 * ($current_audit_event - $min_audit_event) /
-                      ($max_audit_event - $min_audit_event);
+            if ( -t STDIN ) 
+            {
+                printf "\r$exporting_msg: %0.1f%% complete... ",
+                       100 * ($current_audit_event - $min_audit_event) /
+                             ($max_audit_event - $min_audit_event);
+            }
         }
 
         $row_count++;
