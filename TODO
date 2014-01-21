@@ -1,5 +1,3 @@
 Add support for logging schemas other than public
-Add checking to ensure no logging of auditlog schema
 Fix usage message on all tools when connect info is incorrect
 Make -m option to cyanaudit_dump optional
-Set config variables on database instead of in postgresql.conf

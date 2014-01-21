@@ -7,6 +7,7 @@ modifications, for the purposes of finding who was responsible for making a
 particular change, or when exactly it occurred.
 
 Some features of Cyan Audit:
+
 * Enabling or disabling of logging on a column-by-column basis.
 * Correlation of transactions with the application-level userid
   that performed them (requires a modification to your application).
