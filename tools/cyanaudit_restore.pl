@@ -24,7 +24,16 @@ sub usage($)
         . "  -h host    Connect to given host\n"
         . "  -p port    Connect on given port\n"
         . "  -U user    Connect as given user\n";
+        . " [ -t table_name ] override table name\n";
     exit 1;
+}
+
+sub is_text_empty($)
+{
+    my $val = @_;
+    return 1 unless( defined $val );
+    return 1 if( length( $val ) == 0 );
+    return 0;
 }
 
 sub microtime()
@@ -32,13 +41,20 @@ sub microtime()
     return sprintf '%d.%0.6d', gettimeofday();
 }
 
-our( $opt_U, $opt_d, $opt_h, $opt_p );
-&usage( "Invalid arguments" ) unless( getopts( 'U:d:h:p:' ) );
+our( $opt_t, $opt_U, $opt_d, $opt_h, $opt_p );
+&usage( "Invalid arguments" ) unless( getopts( 'U:d:h:p:t:' ) );
 
 my $port    = $opt_p;
 my $user    = $opt_U;
 my $host    = $opt_h;
 my $dbname  = $opt_d;
+my $table_name = '';
+
+if( $opt_t )
+{
+    $table_name = $opt_t;
+    print "Using override table_name $table_name\n";
+}
 
 unless( @ARGV )
 {
@@ -197,7 +213,12 @@ foreach my $file( @ARGV )
         my $recorded    = $line->[$header_hash{'recorded'     }];
         my $uid         = $line->[$header_hash{'uid'          }];
         my $email       = $line->[$header_hash{'email_address'}];
-        my $table_name  = $line->[$header_hash{'table_name'   }];
+        
+        if( &is_text_empty( $table_name ) )
+        {
+            $table_name  = $line->[$header_hash{'table_name'   }];
+        }
+
         my $column      = $line->[$header_hash{'column_name'  }];
         my $row_pk_val  = $line->[$header_hash{'row_pk_val'   }];
         my $row_op      = $line->[$header_hash{'row_op'       }];
