@@ -321,11 +321,11 @@ __EOF__
     $handle->do( $constraint_q ) or die( "Could not add txid constraint to table partition\n" );
     
     print "Generating indexes...\n" if( DEBUG );
-    $handle->do( "CREATE INDEX ${table_name}_audit_field_idx ON ${schema}.${table_name}(audit_field)" )
+    $handle->do( "CREATE INDEX ${table_name}_audit_field_idx ON ${schema}.${table_name}(audit_field) TABLESPACE ${tablespace}" )
         or die( "Failed to create audit_field index\n" );
-    $handle->do( "CREATE INDEX ${table_name}_recorded_idx    ON ${schema}.${table_name}(recorded)"    )
+    $handle->do( "CREATE INDEX ${table_name}_recorded_idx    ON ${schema}.${table_name}(recorded)    TABLESPACE ${tablespace}" )
         or die( "Failed to create recorded index\n"    );
-    $handle->do( "CREATE INDEX ${table_name}_txid_idx        ON ${schema}.${table_name}(txid)"        )
+    $handle->do( "CREATE INDEX ${table_name}_txid_idx        ON ${schema}.${table_name}(txid)        TABLESPACE ${tablespace}" )
         or die( "Failed to create txid index\n"        );
 
     print "Fixing permissions...\n" if( DEBUG );
@@ -335,6 +335,15 @@ __EOF__
         or die( "Failed to set SELECT perms\n" );
     $handle->do( "GRANT UPDATE (audit_transaction_type)      ON ${schema}.${table_name} TO public" )
         or die( "Failed to set UPDATE perms\n" );
+
+    $handle->do( "ALTER EXTENSION cyanaudit ADD TABLE ${schema}.${table_name}" )
+        or die( "Could not add table ${table_name} to cyanaudit extension" );
+    $handle->do( "ALTER EXTENSION cyanaudit ADD INDEX ${schema}.${table_name}_audit_field_idx" )
+        or die( "Could not associate audit_field index with cyanaudit extension" );
+    $handle->do( "ALTER EXTENSION cyanaudit ADD INDEX ${schema}.${table_name}_recorded_idx" )
+        or die( "Could not associate recorded index with cyanaudit extension" );
+    $handle->do( "ALTER EXTENSION cyanaudit ADD INDEX ${schema}.${table_name}_txid_idx" )
+        or die( "Could not associate txid index with cyanaudit extension" );
 
     $handle->do( "COMMIT" ) or die( "Could not commit restore operation\n" );
     my $end_time = microtime();
