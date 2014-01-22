@@ -23,7 +23,7 @@ sub usage($)
         . "  -d db      Connect to given database\n"
         . "  -h host    Connect to given host\n"
         . "  -p port    Connect on given port\n"
-        . "  -U user    Connect as given user\n";
+        . "  -U user    Connect as given user\n"
         . " [ -t table_name ] override table name\n";
     exit 1;
 }
