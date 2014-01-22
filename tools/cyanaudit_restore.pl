@@ -298,7 +298,7 @@ __EOF__
     my $max_recorded_row = $handle->selectrow_hashref( $max_recorded_q )
         or die( "Could not determine the recorded date range for table partition\n" );
     
-    $table_name = '';
+    my $table_name = '';
 
     if( $opt_t )
     {
