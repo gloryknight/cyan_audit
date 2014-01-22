@@ -29,7 +29,7 @@ sub usage($)
 }
 
 sub is_text_empty($)
-{
+{ #shamelessly stolen from validate_lib
     my $val = @_;
     return 1 unless( defined $val );
     return 1 if( length( $val ) == 0 );
@@ -48,13 +48,6 @@ my $port    = $opt_p;
 my $user    = $opt_U;
 my $host    = $opt_h;
 my $dbname  = $opt_d;
-my $table_name = '';
-
-if( $opt_t )
-{
-    $table_name = $opt_t;
-    print "Using override table_name $table_name\n";
-}
 
 unless( @ARGV )
 {
@@ -213,12 +206,7 @@ foreach my $file( @ARGV )
         my $recorded    = $line->[$header_hash{'recorded'     }];
         my $uid         = $line->[$header_hash{'uid'          }];
         my $email       = $line->[$header_hash{'email_address'}];
-        
-        if( &is_text_empty( $table_name ) )
-        {
-            $table_name  = $line->[$header_hash{'table_name'   }];
-        }
-
+        my $table_name  = $line->[$header_hash{'table_name'   }];
         my $column      = $line->[$header_hash{'column_name'  }];
         my $row_pk_val  = $line->[$header_hash{'row_pk_val'   }];
         my $row_op      = $line->[$header_hash{'row_op'       }];
@@ -310,7 +298,20 @@ __EOF__
     my $max_recorded_row = $handle->selectrow_hashref( $max_recorded_q )
         or die( "Could not determine the recorded date range for table partition\n" );
     
-    my $table_name   = $max_recorded_row->{'table_name'  };
+    $table_name = '';
+
+    if( $opt_t )
+    {
+        $table_name = $opt_t;
+        print "Using override table_name $table_name\n";
+    }
+
+    
+    if( &is_text_empty( $table_name ) )
+    {
+        $table_name  = $max_recorded_row->{'table_name'  };
+    }
+
     my $max_rec      = $max_recorded_row->{'max_recorded'};
     my $min_rec      = $max_recorded_row->{'min_recorded'};
     my $max_txid     = $max_recorded_row->{'max_txid'    };
