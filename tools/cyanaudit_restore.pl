@@ -23,8 +23,7 @@ sub usage($)
         . "  -d db      Connect to given database\n"
         . "  -h host    Connect to given host\n"
         . "  -p port    Connect on given port\n"
-        . "  -U user    Connect as given user\n"
-        . " [ -t table_name ] override table name\n";
+        . "  -U user    Connect as given user\n";
     exit 1;
 }
 
@@ -41,8 +40,8 @@ sub microtime()
     return sprintf '%d.%0.6d', gettimeofday();
 }
 
-our( $opt_t, $opt_U, $opt_d, $opt_h, $opt_p );
-&usage( "Invalid arguments" ) unless( getopts( 'U:d:h:p:t:' ) );
+our( $opt_U, $opt_d, $opt_h, $opt_p );
+&usage( "Invalid arguments" ) unless( getopts( 'U:d:h:p:' ) );
 
 my $port    = $opt_p;
 my $user    = $opt_U;
@@ -286,8 +285,8 @@ WITH tt_recorded AS
            min( txid     ) AS min_txid
       FROM ${schema}.tb_audit_event_restore
 )
-    SELECT 'tb_audit_event_' || to_char( tt.max_recorded, 'YYYYMMDD_HH24MI' ) 
-                AS table_name,
+    SELECT 'tb_audit_event_' || to_char( tt.max_recorded, 'YYYYMMDD_HH24MI' )
+            AS table_name,
            tt.max_recorded,
            tt.min_recorded,
            tt.max_txid,
@@ -298,16 +297,9 @@ __EOF__
     my $max_recorded_row = $handle->selectrow_hashref( $max_recorded_q )
         or die( "Could not determine the recorded date range for table partition\n" );
     
-    my $table_name = '';
+    ( my $table_name = $file ) =~ s/^(tb_[_a-zA-Z0-9]*)\..*$/$1/;
 
-    if( $opt_t )
-    {
-        $table_name = $opt_t;
-        print "Using override table_name $table_name\n";
-    }
-
-    
-    if( &is_text_empty( $table_name ) )
+    if( &is_text_empty( $table_name ) or ( defined $table_name and $file eq $table_name ) )
     {
         $table_name  = $max_recorded_row->{'table_name'  };
     }
