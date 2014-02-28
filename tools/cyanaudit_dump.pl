@@ -155,7 +155,7 @@ foreach my $table_row (@$table_rows)
 
     my $exporting_msg = "Exporting $schema.$table ($size)";
 
-    print "$exporting_msg: "
+    print "$exporting_msg: ";
     
     print " Preparing... " if( -t STDIN );
 

@@ -1160,20 +1160,24 @@ begin
     my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
 
     if my_version >= array[9,3,3]::integer[] then
-        my_cmd := 'CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger() '
-               || 'returns event_trigger '
-               || 'language plpgsql as '
-               || '   $function$ '
-               || 'begin '
-               || '     perform * '
-               || '        from @extschema@.tb_audit_field '
-               || '       limit 1; '
-               || ''
-               || '     if found then '
-               || '         perform @extschema@.fn_update_audit_fields(); '
-               || '     end if; '
-               || 'end '
-               || '   $function$; ';
+        my_cmd := E'CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger() \n'
+               || E'returns event_trigger \n'
+               || E'language plpgsql as \n'
+               || E'   $function$ \n'
+               || E'begin \n'
+               || E'     perform * \n'
+               || E'        from @extschema@.tb_audit_field \n'
+               || E'       limit 1 \n'
+               || E'         for update; \n'
+               || E'\n'
+               || E'     if found then \n'
+               || E'         perform @extschema@.fn_update_audit_fields(); \n'
+               || E'     end if; \n'
+               || E'exception \n'
+               || E'     when insufficient_privilege \n'
+               || E'     then return; \n'
+               || E'end \n'
+               || E'   $function$; \n';
 
         execute my_cmd;
 

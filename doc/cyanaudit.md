@@ -332,7 +332,7 @@ cheaper media. `cyanaudit_log_rotate.pl` is used to perform this log rotation.
 When the current events are rotated into the archive, the table
 `tb_audit_event_current` is renamed to e.g. `tb_audit_event_20131229_0401`,
 where the table name reflects the time the table was rotated. A new
-`tb_audit_event_current` in your default tablespae is then created to receive
+`tb_audit_event_current` in your default tablespace is then created to receive
 subsequent events.
 
 Under a typical server load, you will want to rotate your audit events on a

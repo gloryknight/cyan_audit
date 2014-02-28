@@ -39,4 +39,12 @@
   parameters from postgresql.conf. However, for PostgreSQL 9.1, you must retain
   the `custom_variable_classes = cyanaudit` setting.
 
-
+0.9.2 -> 0.9.3
+--------------
+- Fixed error where event trigger threw an exception when running as
+  unprivileged user.
+- Tables restored with cyanaudit_restore.pl are now placed into the correct
+  tablespace and also altered to be owned by the cyanaudit extension.
+- More intelligent naming of tables created by cyanaudit_restore.pl. Name of
+  table will be taken from filename if it looks reasonable, otherwise it will be
+  named dynamically according to the last recorded event in the table.
