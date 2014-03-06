@@ -827,7 +827,7 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields() returns void as
 begin
     perform *
        from @extschema@.tb_audit_field
-      where audit_field = 0;
+      where audit_field = 0
         for update;
 
     if not found then
