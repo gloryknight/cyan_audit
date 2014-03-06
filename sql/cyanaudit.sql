@@ -828,6 +828,7 @@ begin
     perform *
        from @extschema@.tb_audit_field
       where audit_field = 0;
+        for update;
 
     if not found then
         insert into @extschema@.tb_audit_data_type 

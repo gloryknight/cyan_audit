@@ -48,3 +48,5 @@
 - More intelligent naming of tables created by cyanaudit_restore.pl. Name of
   table will be taken from filename if it looks reasonable, otherwise it will be
   named dynamically according to the last recorded event in the table.
+- Fixed concurrency problem when restoring a cyanaudit-enabled database with
+  pg_restore -j ##.
