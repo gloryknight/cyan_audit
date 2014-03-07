@@ -1195,7 +1195,8 @@ begin
         execute my_cmd;
     end if;
 end;
- $$;
+ $$
+    language plpgsql;
 
 select @extschema@.fn_install_cyanaudit_event_trigger();
 
