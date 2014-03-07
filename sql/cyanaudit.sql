@@ -1148,7 +1148,8 @@ CREATE TRIGGER tr_check_audit_field_validity
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_check_audit_field_validity();
 
 
-do language plpgsql
+CREATE OR REPLACE FUNCTION @extschema@.fn_install_cyanaudit_event_trigger()
+returns void AS
  $$
 declare
     my_version  integer[];
@@ -1168,6 +1169,7 @@ begin
                || E'begin \n'
                || E'     perform * \n'
                || E'        from @extschema@.tb_audit_field \n'
+               || E'       where active \n'
                || E'       limit 1 \n'
                || E'         for update; \n'
                || E'\n'
@@ -1182,6 +1184,10 @@ begin
 
         execute my_cmd;
 
+        my_cmd := 'DROP EVENT TRIGGER IF EXISTS tr_update_audit_fields';
+
+        execute my_cmd;
+
         my_cmd := 'CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end '
                || '    WHEN TAG IN (''ALTER TABLE'', ''CREATE TABLE'', ''DROP TABLE'') '
                || '    EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger(); ';
@@ -1190,6 +1196,8 @@ begin
     end if;
 end;
  $$;
+
+select @extschema@.fn_install_cyanaudit_event_trigger();
 
 --- PERMISSIONS
 
