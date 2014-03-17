@@ -252,6 +252,7 @@ exception
          return null;
     when undefined_column then 
          raise notice 'Cyan Audit: Invalid user_table_uid_col or user_table_username_col';
+         return null;
 end
  $_$
     language plpgsql stable strict;
