@@ -1,3 +1,8 @@
+0.9.4 -> 0.9.5
+--------------
+- Fixed incorrect behavior when cyanaudit.user_table_username_col was not
+  correctly set.
+
 0.9.3 -> 0.9.4
 --------------
 - Fixed error where pg_restore was trying to create triggers pointing to
