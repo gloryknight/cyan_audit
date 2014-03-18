@@ -227,16 +227,14 @@ foreach my $table_row (@$table_rows)
     {
         print $fh $row or die "Error writing to file: $!\n";
 
-        if ( -t STDIN ) 
+        if ( -t STDIN and $row_count > 1 ) 
         {
             (my $current_audit_event = $row) =~ s/,.*$//s;
 
             my $current_percent = ($current_audit_event - $min_audit_event) /
                                   ($max_audit_event - $min_audit_event) * 100;
 
-            if(  $row_count > 1 and 
-                ($row_count % 1000 == 1 or $current_percent == 100) 
-              )
+            if( $row_count % 1000 == 1 or $current_percent == 100 ) 
             {
                 printf "\r$exporting_msg: %0.1f%% complete... ",
                         $current_percent;

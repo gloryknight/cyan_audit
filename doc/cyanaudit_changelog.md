@@ -2,6 +2,10 @@
 --------------
 - Fixed incorrect behavior when cyanaudit.user_table_username_col was not
   correctly set.
+- Fixed bug when specifying -c option to cyanaudit_dump.pl, such that some files
+  would be overwritten when they already existed, and some would not be written
+  even if they didn't yet exist.
+- Fixed a couple of minor aesthetic issues with cyanaudit_dump.pl
 
 0.9.3 -> 0.9.4
 --------------
