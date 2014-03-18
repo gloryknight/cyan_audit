@@ -6,6 +6,7 @@ $| = 1;
 
 use DBI;
 use Getopt::Std;
+use Data::Dumper;
 
 my %opts;
 
@@ -148,7 +149,9 @@ foreach my $table_row (@$table_rows)
     my ($table, $size, $remove) = @$table_row;
     my $file = "$table.csv";
     
-    if( glob( "$outdir/$file.*" ) and not $opts{'c'} )
+    my @glob_results = glob( "$outdir/$file.*" );
+
+    if( @glob_results and not $opts{'c'} )
     {
         next;
     }
