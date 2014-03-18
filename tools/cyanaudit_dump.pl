@@ -162,15 +162,6 @@ foreach my $table_row (@$table_rows)
     
     print " Preparing... " if( -t STDIN );
 
-    my $open_str = "> $outdir/$table.csv";
-
-    if( $opts{'z'} )
-    {
-        $open_str = "| gzip -9 -c $open_str.gz";
-    }
-
-    open( my $fh, $open_str ) or die "Could not open output for writing: $!\n";
-
     my $min_q = "select audit_event "
               . "  from $schema.$table "
               . " where recorded = "
@@ -220,6 +211,15 @@ foreach my $table_row (@$table_rows)
 
     $handle->do("copy ($data_q) to stdout with csv header");
 
+    my $open_str = "> $outdir/$table.csv";
+
+    if( $opts{'z'} )
+    {
+        $open_str = "| gzip -9 -c $open_str.gz";
+    }
+
+    open( my $fh, $open_str ) or die "Could not open output for writing: $!\n";
+
     my $row;
     my $row_count = 0;
 
@@ -227,15 +227,19 @@ foreach my $table_row (@$table_rows)
     {
         print $fh $row or die "Error writing to file: $!\n";
 
-        if( $row_count > 1 and $row_count % 1000 == 1 )
+        if ( -t STDIN ) 
         {
             (my $current_audit_event = $row) =~ s/,.*$//s;
 
-            if ( -t STDIN ) 
+            my $current_percent = ($current_audit_event - $min_audit_event) /
+                                  ($max_audit_event - $min_audit_event) * 100;
+
+            if(  $row_count > 1 and 
+                ($row_count % 1000 == 1 or $current_percent == 100) 
+              )
             {
                 printf "\r$exporting_msg: %0.1f%% complete... ",
-                       100 * ($current_audit_event - $min_audit_event) /
-                             ($max_audit_event - $min_audit_event);
+                        $current_percent;
             }
         }
 
