@@ -3,7 +3,7 @@
 Synopsis
 ========
 
-Cyan Audit is a powerful PostgreSQL extension for in-database logging of DDL.
+Cyan Audit is a powerful PostgreSQL extension for in-database logging of DML.
 
 
 Introduction
@@ -21,7 +21,7 @@ Cyan Audit aims to solve this problem by providing an easy and powerful logging
 system that requires minimal modification to your application and is installed
 easily and cleanly as a PostgreSQL extension.
 
-Cyan Audit can selectively log DDL on a column-by-column basis, and you can
+Cyan Audit can selectively log DML on a column-by-column basis, and you can
 select which tables/columns to log using a simple UPDATE command.
 
 You can also turn off logging entirely for just your session if you'd like to
