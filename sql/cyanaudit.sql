@@ -508,38 +508,28 @@ begin
      where table_name = in_table_name
        and column_name = in_column_name;
 
+    -- if we do not yet know about the field
     if not found then
-        perform *
-           from @extschema@.tb_audit_field
-          where table_name = in_table_name
-          limit 1;
+        -- set it active if another field in this table is already active
+        select active
+          into my_active
+          from @extschema@.tb_audit_field
+         where table_name = in_table_name
+         order by active desc
+         limit 1;
 
-        if found then
-            perform *
-               from @extschema@.tb_audit_field
-              where table_name = in_table_name
-                and active = true
-              limit 1;
-
-            if found then
-                my_active = true;
-            else
-                my_active = false;
-            end if;
-        else
-            perform *
-               from information_schema.columns
-              where table_schema = 'public'
-                and table_name = in_table_name
-                and column_name = in_column_name;
-
-            if found then
-                my_active = true;
-            else
-                my_active = false;
-            end if;
+        -- If no columns of this table are known, 
+        -- or this table is currently being logged,
+        if my_active is distinct from false then
+            -- set it active if the column is currently real in the db
+            select count(*)::integer::boolean
+              into my_active
+              from information_schema.columns
+             where table_schema = 'public'
+               and table_name = in_table_name
+               and column_name = in_column_name;
         end if;
-          
+
         insert into @extschema@.tb_audit_field
         (
             table_name,
