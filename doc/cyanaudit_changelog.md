@@ -7,6 +7,7 @@
   even if they didn't yet exist.
 - Fixed a couple of minor aesthetic issues with cyanaudit_dump.pl
 - Fixed auto-activate logic for new rows in tb_audit_field
+- Fixed malfunction when database name had characters that needed to be quoted
 
 0.9.3 -> 0.9.4
 --------------
