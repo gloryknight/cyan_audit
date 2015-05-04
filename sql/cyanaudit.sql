@@ -72,28 +72,28 @@ begin
     end if;
           
     -- Set default values for configuration parameters
-    my_command := 'alter database ' || current_database() 
+    my_command := 'alter database ' || quote_ident(current_database())
                || ' set cyanaudit.enabled = 1';
     execute my_command;
-    my_command := 'alter database ' || current_database() 
+    my_command := 'alter database ' || quote_ident(current_database())
                || ' set cyanaudit.uid = -1';
     execute my_command;
-    my_command := 'alter database ' || current_database() 
+    my_command := 'alter database ' || quote_ident(current_database())
                || ' set cyanaudit.last_txid = 0';
     execute my_command;
-    my_command := 'alter database ' || current_database() 
+    my_command := 'alter database ' || quote_ident(current_database())
                || ' set cyanaudit.archive_tablespace = pg_default';
     execute my_command;
-    my_command := 'alter database ' || current_database() 
+    my_command := 'alter database ' || quote_ident(current_database())
                || ' set cyanaudit.user_table = '''' ';
     execute my_command;
-    my_command := 'alter database ' || current_database() 
+    my_command := 'alter database ' || quote_ident(current_database())
                || ' set cyanaudit.user_table_uid_col = '''' ';
     execute my_command;
-    my_command := 'alter database ' || current_database() 
+    my_command := 'alter database ' || quote_ident(current_database())
                || ' set cyanaudit.user_table_email_col = '''' ';
     execute my_command;
-    my_command := 'alter database ' || current_database() 
+    my_command := 'alter database ' || quote_ident(current_database())
                || ' set cyanaudit.user_table_username_col = '''' ';
     execute my_command;
 end;
@@ -786,7 +786,7 @@ EXCEPTION
          raise notice 'Undefined function call. Please reinstall cyanaudit.';
          return NEW;
     WHEN undefined_column THEN
-         raise notice 'Undefined column. Please run fn_update_audit_fields().';
+         raise notice 'Undefined column. Please run fn_update_audit_fields() as superuser.';
          return NEW;
     WHEN undefined_object THEN
          raise notice 'Cyan Audit configuration invalid. Logging disabled.';
