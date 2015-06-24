@@ -311,6 +311,8 @@ __EOF__
     
     print "Renaming table...\n" if( DEBUG );
     
+    # TODO: Need to remove table from extension before dropping it, but only if
+    # it exists in the first place.
     $handle->do( "DROP TABLE IF EXISTS ${schema}.${table_name}" );
     $handle->do( "ALTER TABLE ${schema}.tb_audit_event_restore RENAME TO ${table_name}" )
          or die( "Could not rename tb_audit_event_restore to $table_name\n" );
