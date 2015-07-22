@@ -10,6 +10,7 @@ use Getopt::Std;
 use Text::CSV_XS;
 use Data::Dumper;
 use Time::HiRes qw(gettimeofday);
+use File::Basename;
 
 use constant DEBUG => 1;
 
@@ -297,7 +298,7 @@ __EOF__
     my $max_recorded_row = $handle->selectrow_hashref( $max_recorded_q )
         or die( "Could not determine the recorded date range for table partition\n" );
     
-    ( my $table_name = $file ) =~ s/^(tb_[_a-zA-Z0-9]*)\..*$/$1/;
+    ( my $table_name = (basename $file) ) =~ s/^(tb_[_a-zA-Z0-9]*)\..*$/$1/;
 
     if( &is_text_empty( $table_name ) or ( defined $table_name and $file eq $table_name ) )
     {
