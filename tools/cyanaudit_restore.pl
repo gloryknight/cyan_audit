@@ -276,7 +276,7 @@ foreach my $file( @ARGV )
     print "\nDone.\n";
 
     #Rename table and add check constraint to partition
-    print "Getting contraint bounds and table suffix...\n" if( DEBUG );
+    print "Getting constraint bounds and table suffix...\n" if( DEBUG );
     my $max_recorded_q = <<__EOF__;
 WITH tt_recorded AS
 (
