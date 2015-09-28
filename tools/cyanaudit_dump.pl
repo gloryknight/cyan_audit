@@ -7,6 +7,7 @@ $| = 1;
 use DBI;
 use Getopt::Std;
 use Data::Dumper;
+use Encode qw(encode);
 
 my %opts;
 
@@ -225,11 +226,13 @@ foreach my $table_row (@$table_rows)
 
     while( $handle->pg_getcopydata(\$row) >= 0 )
     {
-        print $fh $row or die "Error writing to file: $!\n";
+        my $row_encoded = encode( 'UTF-8', $row, Encode::FB_CROAK );
+
+        print $fh $row_encoded or die "Error writing to file: $!\n";
 
         if ( -t STDIN and $row_count > 1 ) 
         {
-            (my $current_audit_event = $row) =~ s/,.*$//s;
+            (my $current_audit_event = $row_encoded) =~ s/,.*$//s;
 
             my $current_percent = ($current_audit_event - $min_audit_event) /
                                   ($max_audit_event - $min_audit_event) * 100;
