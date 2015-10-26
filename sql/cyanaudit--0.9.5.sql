@@ -716,6 +716,8 @@ unless( $pk_col )
 }
 
 my $fn_q = <<EOF;
+SET client_min_messages = WARNING;
+
 CREATE OR REPLACE FUNCTION @extschema@.fn_log_audit_event_$table_name()
 returns trigger as
  \$_\$
@@ -794,6 +796,8 @@ EXCEPTION
 END
  \$_\$
     language 'plpgsql';
+
+SET client_min_messages = NOTICE;
 EOF
 
 eval { spi_exec_query($fn_q) };
