@@ -9,6 +9,9 @@
 - Fixed auto-activate logic for new rows in tb_audit_field
 - Fixed malfunction when database name had characters that needed to be quoted
 - Fixed behavior with cyanaudit_restore.pl restoring archives not in current dir
+- Fixed event trigger, which was inserting schema-qualified table names into
+  tb_audit_field, which as a result disabled logging on all existing fields.
+- Quieted notices regarding truncated trigger and function names
 
 0.9.3 -> 0.9.4
 --------------

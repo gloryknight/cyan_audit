@@ -298,12 +298,14 @@ begin
     select a.attname
       into strict my_pk_col
       from pg_attribute a
+      join pg_class c
+        on a.attrelid = c.relname
       join pg_constraint cn
         on a.attrelid = cn.conrelid
        and a.attnum = any(cn.conkey)
        and cn.contype = 'p'
        and array_length(cn.conkey, 1) = 1
-       and a.attrelid::regclass::varchar = in_table_name;
+       and c.relname::varchar = in_table_name;
 
     return my_pk_col;
 exception
@@ -716,8 +718,6 @@ unless( $pk_col )
 }
 
 my $fn_q = <<EOF;
-SET client_min_messages = WARNING;
-
 CREATE OR REPLACE FUNCTION @extschema@.fn_log_audit_event_$table_name()
 returns trigger as
  \$_\$
@@ -796,9 +796,9 @@ EXCEPTION
 END
  \$_\$
     language 'plpgsql';
-
-SET client_min_messages = NOTICE;
 EOF
+
+spi_exec_query( 'SET client_min_messages to WARNING' );
 
 eval { spi_exec_query($fn_q) };
 elog(ERROR, $@) if $@;
@@ -811,6 +811,8 @@ eval { spi_exec_query($tg_q) };
 my $ext_q = "ALTER EXTENSION cyanaudit ADD FUNCTION @extschema@.fn_log_audit_event_$table_name()";
 
 eval { spi_exec_query($ext_q) };
+
+spi_exec_query( 'SET client_min_messages to NOTICE' );
  $_$
     language 'plperl';
 
@@ -837,12 +839,14 @@ begin
         select coalesce(
                    af.audit_field,
                    @extschema@.fn_get_or_create_audit_field(
-                       a.attrelid::regclass::varchar,
+                       c.relname::varchar,
                        a.attname::varchar
                    )
                ) as audit_field,
                (a.attrelid is null and af.active) as stale
           from pg_attribute a
+          join pg_class c
+            on a.attrelid = c.oid
           join pg_constraint cn
             on cn.conrelid = a.attrelid
            and cn.contype = 'p'
@@ -853,7 +857,7 @@ begin
             on cn.connamespace = n.oid
            and n.nspname::varchar = 'public'
      full join @extschema@.tb_audit_field af
-            on a.attrelid::regclass::varchar = af.table_name
+            on c.relname::varchar = af.table_name
            and a.attname::varchar = af.column_name
     )
     update @extschema@.tb_audit_field af
