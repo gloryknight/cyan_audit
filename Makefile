@@ -7,8 +7,7 @@ SCRIPTS      = $(wildcard tools/*)
 
 PG_CONFIG    = pg_config
 DATA         = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION)--$(EXTVERSION).sql
-PKG_SQL      = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION).sql
-EXTRA_CLEAN  = sql/$(EXTENSION)--$(EXTVERSION).sql
+PKG_SQL      = $(wildcard sql/$(EXTENSION)--*--*.sql)
 
 PKGFILES     = cyanaudit.control LICENSE README.md Makefile META.json \
                $(PKG_SQL) $(DOCS) $(SCRIPTS)
@@ -21,11 +20,6 @@ PG91         = $(shell $(PG_CONFIG) --version | grep -qE " 8\\.| 9\\.0| 9\\.1\\.
 ifeq ($(PG91),no)
 $(error "Cyan Audit requires PostgreSQL 9.1.7 or above")
 endif
-
-all: sql/$(EXTENSION)--$(EXTVERSION).sql
-
-sql/$(EXTENSION)--$(EXTVERSION).sql: sql/$(EXTENSION).sql
-	cp $< $@
 
 sdist: $(PKGNAME)
 

@@ -1,32 +1,10 @@
-/*
-BEFORE RUNNING THIS SCRIPT:
-1. Create the audit_log schema in your database
-2. Make sure the following lines appear at the bottom of postgresql.conf.
-   Customize the last five values to match your database configuration.
-   When you have added these lines, be sure to reload postgres.
-
-   # Don't change these
-   custom_variable_classes = 'cyanaudit'
-   cyanaudit.uid = '-1'
-   cyanaudit.last_txid = '0'
-   cyanaudit.enabled = '1'
-   # Edit these
-   cyanaudit.user_table = 'tb_entity'
-   cyanaudit.user_table_uid_col = 'entity'
-   cyanaudit.user_table_email_col = 'email_address'
-   cyanaudit.user_table_username_col = 'username'
-   cyanaudit.archive_tablespace = 'pg_default'
-*/
-
 ------------------------
 ------ FUNCTIONS ------
 ------------------------
 
-
 do language plpgsql
  $$
 declare
-    my_missing_config   varchar;
     my_value            varchar;
     my_version          integer[];
     my_command          varchar;
@@ -34,8 +12,8 @@ begin
     my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
 
     -- Verify minimum version
-    if my_version < array[9,1,7]::integer[] then
-        raise exception 'Cyan Audit requires PostgreSQL 9.1.7 or above';
+    if my_version < array[9,3,3]::integer[] then
+        raise exception 'Cyan Audit requires PostgreSQL 9.3.3 or above';
     end if;
 
     -- Install pl/perl if necessary
@@ -57,45 +35,16 @@ begin
         raise exception 'Must install to schema other than public, e.g. cyanaudit';
     end if;
 
-    my_missing_config := '';
-
-    -- If version < 9.2.0, verify custom_variable_classes is correctly set
-    if my_version < array[9,2,0]::integer[] then
-        begin
-            if not current_setting('custom_variable_classes') ~ '\mcyanaudit\M' then
-                raise exception 'custom_variable_classes must contain ''cyanaudit''';
-            end if;
-        exception
-            when undefined_object
-            then raise exception 'missing custom_variable_classes = ''cyanaudit'' in postgresql.conf';
-        end;
-    end if;
-          
     -- Set default values for configuration parameters
-    my_command := 'alter database ' || quote_ident(current_database())
-               || ' set cyanaudit.enabled = 1';
-    execute my_command;
-    my_command := 'alter database ' || quote_ident(current_database())
-               || ' set cyanaudit.uid = -1';
-    execute my_command;
-    my_command := 'alter database ' || quote_ident(current_database())
-               || ' set cyanaudit.last_txid = 0';
-    execute my_command;
-    my_command := 'alter database ' || quote_ident(current_database())
-               || ' set cyanaudit.archive_tablespace = pg_default';
-    execute my_command;
-    my_command := 'alter database ' || quote_ident(current_database())
-               || ' set cyanaudit.user_table = '''' ';
-    execute my_command;
-    my_command := 'alter database ' || quote_ident(current_database())
-               || ' set cyanaudit.user_table_uid_col = '''' ';
-    execute my_command;
-    my_command := 'alter database ' || quote_ident(current_database())
-               || ' set cyanaudit.user_table_email_col = '''' ';
-    execute my_command;
-    my_command := 'alter database ' || quote_ident(current_database())
-               || ' set cyanaudit.user_table_username_col = '''' ';
-    execute my_command;
+    my_command := 'alter database ' || quote_ident(current_database()) || ' ';
+    execute my_command || 'set cyanaudit.enabled = 1';
+    execute my_command || 'set cyanaudit.uid = -1';
+    execute my_command || 'set cyanaudit.last_txid = 0';
+    execute my_command || 'set cyanaudit.archive_tablespace = pg_default';
+    execute my_command || 'set cyanaudit.user_table = '''' ';
+    execute my_command || 'set cyanaudit.user_table_uid_col = '''' ';
+    execute my_command || 'set cyanaudit.user_table_email_col = '''' ';
+    execute my_command || 'set cyanaudit.user_table_username_col = '''' ';
 end;
  $$;
 
@@ -135,18 +84,16 @@ end
     language plpgsql stable;
 
 
-
+-- fn_set_last_audit_txid
 CREATE OR REPLACE FUNCTION @extschema@.fn_set_last_audit_txid
 (
-    in_txid   bigint default txid_current()
+    bigint default txid_current()
 )
 returns bigint as
  $_$
-begin
-    return set_config('cyanaudit.last_txid', in_txid::varchar, false);
-end
+    SELECT set_config('cyanaudit.last_txid', $1::varchar, false)::bigint;
  $_$
-    language plpgsql strict;
+    language sql strict;
 
 
 -- fn_get_last_audit_txid
@@ -154,10 +101,11 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_get_last_audit_txid()
 returns bigint as
  $_$
 begin
-    return nullif(current_setting('cyanaudit.last_txid'), '0');
+    SELECT nullif(current_setting('cyanaudit.last_txid'), '0');
 end
  $_$
-    language plpgsql stable;
+    language sql stable;
+
 
 -- fn_get_email_by_audit_uid
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_email_by_audit_uid
@@ -207,6 +155,7 @@ exception
 end
  $_$
     language plpgsql stable strict;
+
 
 -- fn_get_audit_uid_by_username
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid_by_username
@@ -258,33 +207,6 @@ end
     language plpgsql stable strict;
 
 
--- fn_get_column_data_type
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_column_data_type
-(
-    in_table_name   varchar,
-    in_column_name  varchar
-)
-returns varchar as
- $_$
-declare
-    my_data_type    varchar;
-begin
-    select t.typname::information_schema.sql_identifier
-      into my_data_type
-      from pg_attribute a
-      join pg_class c on a.attrelid = c.oid
-      join pg_namespace n on c.relnamespace = n.oid
-      join pg_type t on a.atttypid = t.oid
-     where c.relname::varchar = in_table_name
-       and a.attname = in_column_name
-       and n.nspname::varchar = 'public';
-
-    return my_data_type;
-end
- $_$
-    language 'plpgsql' stable strict;
-
-
 -- fn_get_table_pk_col
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_table_pk_col
 (
@@ -298,12 +220,14 @@ begin
     select a.attname
       into strict my_pk_col
       from pg_attribute a
+      join pg_class c
+        on a.attrelid = c.relname
       join pg_constraint cn
         on a.attrelid = cn.conrelid
        and a.attnum = any(cn.conkey)
        and cn.contype = 'p'
        and array_length(cn.conkey, 1) = 1
-       and a.attrelid::regclass::varchar = in_table_name;
+       and c.relname::varchar = in_table_name;
 
     return my_pk_col;
 exception
@@ -405,36 +329,9 @@ declare
     my_statement    varchar;
 begin
     for my_statement in
-           select (case 
-                  when ae.row_op = 'D' then
-                       'INSERT INTO ' || af.table_name || ' ('
-                       || array_to_string(
-                            array_agg('"'||af.column_name||'"'),
-                          ',') || ') values ('
-                       || array_to_string(
-                            array_agg(coalesce(
-                                quote_literal(ae.old_value), 'NULL'
-                            )),
-                          ',') ||')'
-                  when ae.row_op = 'U' then
-                       'UPDATE ' || af.table_name || ' set '
-                       || array_to_string(array_agg(
-                            af.column_name||' = '||coalesce(
-                                quote_literal(ae.old_value), 'NULL'
-                            )
-                          ), ', ') || ' where ' || afpk.column_name || ' = ' 
-                       || quote_literal(ae.row_pk_val)
-                  when ae.row_op = 'I' then
-                       'DELETE FROM ' || af.table_name || ' where ' 
-                       || afpk.column_name ||' = '||quote_literal(ae.row_pk_val)
-                  end)::varchar as query
-             from @extschema@.tb_audit_event ae
-             join @extschema@.tb_audit_field af using(audit_field)
-             join @extschema@.tb_audit_field afpk on af.table_pk = afpk.audit_field
-            where ae.txid = in_txid
-         group by af.table_name, ae.row_op, afpk.column_name, 
-                  ae.row_pk_val, ae.recorded
-         order by ae.recorded desc
+        select query 
+          from vw_audit_transaction_statement_inverse
+         where txid = in_txid;
     loop
         execute my_statement;
         return next my_statement;
@@ -452,40 +349,9 @@ end
 CREATE OR REPLACE FUNCTION @extschema@.fn_undo_last_transaction()
 returns setof varchar as
  $_$
-begin
-    return query select @extschema@.fn_undo_transaction(fn_get_last_audit_txid());
-end
+    select @extschema@.fn_undo_transaction(fn_get_last_audit_txid());
  $_$
-    language 'plpgsql';
-
-
-
--- fn_get_or_create_audit_data_type
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_data_type
-(
-    in_type_name    varchar
-)
-returns integer as
- $_$
-declare
-    my_audit_data_type   integer;
-begin
-    select audit_data_type
-      into my_audit_data_type
-      from @extschema@.tb_audit_data_type
-     where name = in_type_name;
-
-    if not found then
-        my_audit_data_type := nextval('@extschema@.sq_pk_audit_data_type');
-
-        insert into @extschema@.tb_audit_data_type( audit_data_type, name ) 
-            values( my_audit_data_type, in_type_name );
-    end if;
-
-    return my_audit_data_type;
-end
- $_$
-    language 'plpgsql' strict;
+    language 'sql';
 
 
 
@@ -493,8 +359,7 @@ end
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_field
 (
     in_table_name       varchar,
-    in_column_name      varchar,
-    in_audit_data_type  integer default null
+    in_column_name      varchar
 )
 returns integer as
  $_$
@@ -534,15 +399,13 @@ begin
         (
             table_name,
             column_name,
-            active,
-            audit_data_type
+            active
         )
         values
         (
             in_table_name, 
             in_column_name,
-            my_active,
-            in_audit_data_type
+            my_active
         )
         returning audit_field
         into my_audit_field;
@@ -561,7 +424,7 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_new_audit_event
     in_audit_field      integer, -- FK into tb_audit_field
     in_row_pk_val       integer, -- value of primary key of this row
     in_recorded         timestamp, -- clock timestamp of row op
-    in_row_op           varchar, -- 'I', 'U', or 'D'
+    in_row_op           varchar, -- 'INSERT', 'UPDATE', or 'DELETE'
     in_old_value        anyelement, -- old value or null if INSERT
     in_new_value        anyelement  -- new value or null if DELETE
 )
@@ -760,11 +623,12 @@ foreach my $row (@{$colnames_rv->{'rows'}})
 
     $fn_q .= <<EOF;
     IF (TG_OP = 'INSERT' AND
-        my_new_row.$column_name IS NOT NULL) OR
+        my_new_row.${column_name} IS NOT NULL) OR
        (TG_OP = 'UPDATE' AND
         my_new_row.${column_name}::text IS DISTINCT FROM
         my_old_row.${column_name}::text) OR
-       (TG_OP = 'DELETE')
+       (TG_OP = 'DELETE') AND
+        my_old_row.${column_name} IS NOT NULL
     THEN
         perform @extschema@.fn_new_audit_event(
                     $audit_field,
@@ -796,6 +660,8 @@ END
     language 'plpgsql';
 EOF
 
+spi_exec_query( 'SET client_min_messages to WARNING' );
+
 eval { spi_exec_query($fn_q) };
 elog(ERROR, $@) if $@;
 
@@ -807,6 +673,8 @@ eval { spi_exec_query($tg_q) };
 my $ext_q = "ALTER EXTENSION cyanaudit ADD FUNCTION @extschema@.fn_log_audit_event_$table_name()";
 
 eval { spi_exec_query($ext_q) };
+
+spi_exec_query( 'SET client_min_messages to NOTICE' );
  $_$
     language 'plperl';
 
@@ -822,8 +690,6 @@ begin
         for update;
 
     if not found then
-        insert into @extschema@.tb_audit_data_type 
-             values (0, '[unknown]');
         insert into @extschema@.tb_audit_field 
              values (0, '[unknown]','[unknown]', 0, 0, false);
     end if;
@@ -833,12 +699,14 @@ begin
         select coalesce(
                    af.audit_field,
                    @extschema@.fn_get_or_create_audit_field(
-                       a.attrelid::regclass::varchar,
+                       c.relname::varchar,
                        a.attname::varchar
                    )
                ) as audit_field,
                (a.attrelid is null and af.active) as stale
           from pg_attribute a
+          join pg_class c
+            on a.attrelid = c.oid
           join pg_constraint cn
             on cn.conrelid = a.attrelid
            and cn.contype = 'p'
@@ -849,7 +717,7 @@ begin
             on cn.connamespace = n.oid
            and n.nspname::varchar = 'public'
      full join @extschema@.tb_audit_field af
-            on a.attrelid::regclass::varchar = af.table_name
+            on c.relname::varchar = af.table_name
            and a.attname::varchar = af.column_name
     )
     update @extschema@.tb_audit_field af
@@ -880,22 +748,6 @@ end
 ----- TABLES -----
 ------------------
 
--- tb_audit_data_type
-create sequence @extschema@.sq_pk_audit_data_type;
-
-CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_data_type
-(
-    audit_data_type integer primary key
-                    default nextval('@extschema@.sq_pk_audit_data_type'),
-    name            varchar not null unique
-);
-
-alter sequence @extschema@.sq_pk_audit_data_type
-    owned by @extschema@.tb_audit_data_type.audit_data_type;
-
-SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_data_type','');
-SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_data_type','');
-
 -- tb_audit_field
 create sequence @extschema@.sq_pk_audit_field;
 
@@ -904,10 +756,10 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
     audit_field     integer primary key default nextval('@extschema@.sq_pk_audit_field'),
     table_name      varchar not null,
     column_name     varchar not null,
-    audit_data_type integer not null references @extschema@.tb_audit_data_type,   
     table_pk        integer not null references @extschema@.tb_audit_field,
     active          boolean not null default true,
-    CONSTRAINT tb_audit_field_table_column_key UNIQUE(table_name,column_name),
+    CONSTRAINT tb_audit_field_table_column_key 
+        UNIQUE(table_name,column_name),
     CONSTRAINT tb_audit_field_tb_audit_event_not_allowed 
         CHECK( table_name not like 'tb_audit_event%' )
 );
@@ -947,12 +799,16 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
     uid                     integer not null default @extschema@.fn_get_audit_uid(),
     row_op                  char(1) not null CHECK (row_op in ('I','U','D')),
     txid                    bigint not null default txid_current(),
-    pid                     integer not null default pg_backend_pid(),
-    audit_transaction_type  integer 
-                            references @extschema@.tb_audit_transaction_type,
+    audit_transaction_type  integer references @extschema@.tb_audit_transaction_type,
     old_value               text,
     new_value               text
 );
+
+ALTER TABLE tb_audit_event
+    ADD CONSTRAINT tb_audit_event_null_on_insert_or_delete_chk
+        CHECK( case when row_op = 'I' then old_value is null when row_ip = 'D' then new_value is null ),
+    ADD CONSTRAINT tb_audit_event_changed_on_update_chk
+        CHECK( case when row_op = 'U' then old_value is distinct from new_value );
 
 ALTER SEQUENCE @extschema@.sq_pk_audit_event
     owned by @extschema@.tb_audit_event.audit_event;
@@ -1014,29 +870,63 @@ CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
                || array_to_string(array_agg('"'||af.column_name||'"'), ',') 
                || ') VALUES ('
                || array_to_string(array_agg(coalesce(
-                    quote_literal(ae.new_value)||'::'||adt.name, 'NULL'
+                    quote_literal(ae.new_value), 'NULL'
                   )), ',') ||');'
           when ae.row_op = 'U' then
                'UPDATE ' || af.table_name || ' SET '
                || array_to_string(array_agg(af.column_name||' = '||coalesce(
-                    quote_literal(ae.new_value)||'::'||adt.name, 'NULL'
+                    quote_literal(ae.new_value), 'NULL'
                   )), ', ') || ' WHERE ' || afpk.column_name || ' = ' 
-               || quote_literal(ae.row_pk_val) || '::' || adtpk.name || ';'
+               || quote_literal(ae.row_pk_val) || ';'
           when ae.row_op = 'D' then
                'DELETE FROM ' || af.table_name || ' WHERE ' || afpk.column_name
-               ||' = '||quote_literal(ae.row_pk_val)||'::'||adtpk.name||';'
+               ||' = '||quote_literal(ae.row_pk_val) || ';'
           end)::varchar as query
      from @extschema@.tb_audit_event ae
      join @extschema@.tb_audit_field af using(audit_field)
-     join @extschema@.tb_audit_data_type adt using(audit_data_type)
      join @extschema@.tb_audit_field afpk on af.table_pk = afpk.audit_field
-     join @extschema@.tb_audit_data_type adtpk 
-       on afpk.audit_data_type = adtpk.audit_data_type
 left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
  group by af.table_name, ae.row_op, afpk.column_name,
-          ae.row_pk_val, adtpk.name, ae.txid, ae.recorded,
+          ae.row_pk_val, ae.txid, ae.recorded,
           att.label, @extschema@.fn_get_email_by_audit_uid(ae.uid)
  order by ae.recorded;
+
+
+-- vw_audit_transaction_statement_inverse
+CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement_inverse AS
+   select ae.txid,
+          (case ae.row_op
+           when 'D' then 
+                'INSERT INTO ' || af.table_name || ' ('
+                || array_to_string(
+                     array_agg('"'||af.column_name||'"'),
+                   ',') || ') values ('
+                || array_to_string(
+                     array_agg(coalesce(
+                         quote_literal(ae.old_value), 'NULL'
+                     )),
+                   ',') ||')'
+          when 'U' then
+               'UPDATE ' || af.table_name || ' set '
+               || array_to_string(array_agg(
+                    af.column_name||' = '||coalesce(
+                        quote_literal(ae.old_value), 'NULL'
+                    )
+                  ), ', ') || ' where ' || afpk.column_name || ' = ' 
+               || quote_literal(ae.row_pk_val)
+          when 'I' then
+               'DELETE FROM ' || af.table_name || ' where ' 
+               || afpk.column_name ||' = '||quote_literal(ae.row_pk_val)
+          end)::varchar as query
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
+     join @extschema@.tb_audit_field afpk on af.table_pk = afpk.audit_field
+    where ae.txid = in_txid
+ group by af.table_name, ae.row_op, afpk.column_name, 
+          ae.row_pk_val, ae.recorded
+ order by ae.recorded desc
+
+
 
 
 -----------------------
@@ -1072,8 +962,8 @@ end
     language 'plpgsql';
 
 
-drop trigger if exists tr_audit_event_log_trigger_updater
-    on @extschema@.tb_audit_field;
+-- drop trigger if exists tr_audit_event_log_trigger_updater
+--     on @extschema@.tb_audit_field;
 
 CREATE TRIGGER tr_audit_event_log_trigger_updater
     AFTER INSERT OR UPDATE OR DELETE on @extschema@.tb_audit_field
@@ -1094,14 +984,6 @@ begin
             raise exception 'Updating table_name or column_name not allowed.';
         end if;
     end if;
-
-    NEW.audit_data_type := coalesce(
-        NEW.audit_data_type,
-        @extschema@.fn_get_or_create_audit_data_type(
-            @extschema@.fn_get_column_data_type(NEW.table_name, NEW.column_name)
-        ),
-        0
-    );
 
     if NEW.table_pk is null then
         my_pk_col := @extschema@.fn_get_table_pk_col(NEW.table_name);
@@ -1139,57 +1021,34 @@ CREATE TRIGGER tr_check_audit_field_validity
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_check_audit_field_validity();
 
 
-CREATE OR REPLACE FUNCTION @extschema@.fn_install_cyanaudit_event_trigger()
-returns void AS
- $$
-declare
-    my_version  integer[];
-    my_cmd      text;
+-- EVENT TRIGGER
+
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger()
+returns event_trigger
+language plpgsql as
+   $function$
 begin
-    -- If on PostgreSQL 9.3.3 or above, add a DDL trigger to run
-    -- fn_update_audit_fields() automatically. Use EXECUTE to avoid syntax 
-    -- errors during installation on older versions.
+     perform *
+        from @extschema@.tb_audit_field
+       where active
+       limit 1
+         for update;
 
-    my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
+     if found then
+         perform @extschema@.fn_update_audit_fields();
+     end if;
+exception
+     when insufficient_privilege
+     then return;
+end
+   $function$;
 
-    if my_version >= array[9,3,3]::integer[] then
-        my_cmd := E'CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger() \n'
-               || E'returns event_trigger \n'
-               || E'language plpgsql as \n'
-               || E'   $function$ \n'
-               || E'begin \n'
-               || E'     perform * \n'
-               || E'        from @extschema@.tb_audit_field \n'
-               || E'       where active \n'
-               || E'       limit 1 \n'
-               || E'         for update; \n'
-               || E'\n'
-               || E'     if found then \n'
-               || E'         perform @extschema@.fn_update_audit_fields(); \n'
-               || E'     end if; \n'
-               || E'exception \n'
-               || E'     when insufficient_privilege \n'
-               || E'     then return; \n'
-               || E'end \n'
-               || E'   $function$; \n';
+DROP EVENT TRIGGER IF EXISTS tr_update_audit_fields;
 
-        execute my_cmd;
+CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end
+    WHEN TAG IN ('ALTER TABLE', 'CREATE TABLE', 'DROP TABLE')
+    EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger();
 
-        my_cmd := 'DROP EVENT TRIGGER IF EXISTS tr_update_audit_fields';
-
-        execute my_cmd;
-
-        my_cmd := 'CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end '
-               || '    WHEN TAG IN (''ALTER TABLE'', ''CREATE TABLE'', ''DROP TABLE'') '
-               || '    EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger(); ';
-
-        execute my_cmd;
-    end if;
-end;
- $$
-    language plpgsql;
-
-select @extschema@.fn_install_cyanaudit_event_trigger();
 
 --- PERMISSIONS
 

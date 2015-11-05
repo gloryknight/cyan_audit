@@ -1,3 +1,14 @@
+0.9.5 -> 0.9.6
+--------------
+- Fixed event trigger, which was inserting schema-qualified table names into
+  tb_audit_field, which as a result disabled logging on all existing fields.
+- Quieted notices regarding truncated trigger and function names
+- Created vw_audit_transaction_statement_inverse for pulling the inverse of a
+  transaction's effective statements (now used by fn_undo_transaction()).
+- Simplified code by now requiring at least PostgreSQL version 9.3.3.
+- Dropped tb_audit_event.pid, which was not used.
+- Dropped unneeded tb_audit_field.audit_data_type and tb_audit_data_type.
+
 0.9.4 -> 0.9.5
 --------------
 - Fixed incorrect behavior when cyanaudit.user_table_username_col was not
@@ -9,9 +20,6 @@
 - Fixed auto-activate logic for new rows in tb_audit_field
 - Fixed malfunction when database name had characters that needed to be quoted
 - Fixed behavior with cyanaudit_restore.pl restoring archives not in current dir
-- Fixed event trigger, which was inserting schema-qualified table names into
-  tb_audit_field, which as a result disabled logging on all existing fields.
-- Quieted notices regarding truncated trigger and function names
 
 0.9.3 -> 0.9.4
 --------------
