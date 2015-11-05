@@ -627,8 +627,8 @@ foreach my $row (@{$colnames_rv->{'rows'}})
        (TG_OP = 'UPDATE' AND
         my_new_row.${column_name}::text IS DISTINCT FROM
         my_old_row.${column_name}::text) OR
-       (TG_OP = 'DELETE') AND
-        my_old_row.${column_name} IS NOT NULL
+       (TG_OP = 'DELETE' AND
+        my_old_row.${column_name} IS NOT NULL)
     THEN
         perform @extschema@.fn_new_audit_event(
                     $audit_field,
@@ -909,22 +909,21 @@ CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement_inverse AS
           when 'U' then
                'UPDATE ' || af.table_name || ' set '
                || array_to_string(array_agg(
-                    af.column_name||' = '||coalesce(
+                    af.column_name||' = '|| coalesce(
                         quote_literal(ae.old_value), 'NULL'
                     )
                   ), ', ') || ' where ' || afpk.column_name || ' = ' 
                || quote_literal(ae.row_pk_val)
           when 'I' then
                'DELETE FROM ' || af.table_name || ' where ' 
-               || afpk.column_name ||' = '||quote_literal(ae.row_pk_val)
+               || afpk.column_name ||' = '|| quote_literal(ae.row_pk_val)
           end)::varchar as query
      from @extschema@.tb_audit_event ae
      join @extschema@.tb_audit_field af using(audit_field)
      join @extschema@.tb_audit_field afpk on af.table_pk = afpk.audit_field
-    where ae.txid = in_txid
  group by af.table_name, ae.row_op, afpk.column_name, 
-          ae.row_pk_val, ae.recorded
- order by ae.recorded desc
+          ae.row_pk_val, ae.recorded, ae.txid
+ order by ae.recorded desc;
 
 
 
@@ -954,7 +953,9 @@ begin
         and c.relname = my_table_name;
 
     if found then
+        set client_min_messages to warning;
         perform @extschema@.fn_update_audit_event_log_trigger_on_table(my_table_name);
+        set client_min_messages to notice;
     end if;
     return new;
 end

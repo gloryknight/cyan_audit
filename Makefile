@@ -21,6 +21,8 @@ ifeq ($(PG91),no)
 $(error "Cyan Audit requires PostgreSQL 9.1.7 or above")
 endif
 
+all:
+
 sdist: $(PKGNAME)
 
 $(PKGNAME): $(PKGFILES)
