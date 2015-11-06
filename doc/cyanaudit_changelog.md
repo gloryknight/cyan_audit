@@ -1,5 +1,6 @@
 0.9.5 -> 0.9.6
 --------------
+- Added support for logging tables in schemas other than 'public'. Yay!
 - Fixed event trigger, which was inserting schema-qualified table names into
   tb_audit_field, which as a result disabled logging on all existing fields.
 - Quieted notices regarding truncated trigger and function names
@@ -8,6 +9,7 @@
 - Simplified code by now requiring at least PostgreSQL version 9.3.3.
 - Dropped tb_audit_event.pid, which was not used.
 - Dropped unneeded tb_audit_field.audit_data_type and tb_audit_data_type.
+
 
 0.9.4 -> 0.9.5
 --------------
