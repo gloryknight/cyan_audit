@@ -40,7 +40,6 @@ sdist: $(PKG_TGZ)
 
 # Tarball must be rebuilt anytime a package file changes
 $(PKG_TGZ):$(PKGFILES)
-	perl -p -i -e "s/^(\s*default_version\s+=\s+')[\d.]+('.*)/\$1$(VERSION)\$2/" cyanaudit.control
 	ln -sf . $(PKGNAME)
 	mkdir -p dist
 	rm -f $(PKG_TGZ)
