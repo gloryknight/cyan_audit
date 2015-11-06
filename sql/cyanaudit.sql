@@ -1,1 +1,1 @@
-cyanaudit--0.9.6.sql
+cyanaudit--0.9.7.sql
