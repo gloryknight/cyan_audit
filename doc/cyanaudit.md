@@ -41,11 +41,8 @@ Does that sound interesting? Good, let's get started.
 Requirements & Limitations
 ==========================
 
-* PostgreSQL 9.1.7 or above is required for basic functionality.
-* PostgreSQL 9.3.3 or above is required for auto-detection of DDL and automatic
-  modification of configuration.
+* PostgreSQL 9.3.3 or above is required.
 * Requires languages `plpgsql` and `plperl`.
-* Currently only tables in schema `public` can be logged.
 * Currently only tables having a single-column PK of type integer can be logged.
 
 

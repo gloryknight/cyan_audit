@@ -9,28 +9,41 @@ PG_CONFIG    = pg_config
 DATA         = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION)--$(EXTVERSION).sql
 PKG_SQL      = $(wildcard sql/$(EXTENSION)--*--*.sql)
 
+PGXS := $(shell $(PG_CONFIG) --pgxs)
+include $(PGXS)
+
+
+###############################
+### Verify required version ###
+###############################
+
+PGREQVER     = $(shell $(PG_CONFIG) --version | grep -qE " 8\\.| 9\\.[012]| 9\\.3\\.[0-2]\>" && echo no || echo yes)
+
+ifeq ($(PGREQVER),no)
+$(error "Cyan Audit requires PostgreSQL 9.3.3 or above")
+endif
+
+
+
+#############################
+### Packaging for release ###
+#############################
 PKGFILES     = cyanaudit.control LICENSE README.md Makefile META.json \
                $(PKG_SQL) $(DOCS) $(SCRIPTS)
 
 PKGNAME      = $(EXTENSION)-$(EXTVERSION)
 PKG_TGZ      = dist/$(PKGNAME).tar.gz
 
-PG91         = $(shell $(PG_CONFIG) --version | grep -qE " 8\\.| 9\\.0| 9\\.1\\.[0-6]" && echo no || echo yes)
+# Target to create a tarball of all PKGFILES in cyanaudit-XX.YY.ZZ.tar.gz
+sdist: $(PKG_TGZ)
 
-ifeq ($(PG91),no)
-$(error "Cyan Audit requires PostgreSQL 9.1.7 or above")
-endif
 
-all:
-
-sdist: $(PKGNAME)
-
-$(PKGNAME): $(PKGFILES)
+# Tarball must be rebuilt anytime a package file changes
+$(PKG_TGZ):$(PKGFILES)
+	perl -p -i -e "s/^(\s*default_version\s+=\s+')[\d.]+('.*)/\$1$(VERSION)\$2/" cyanaudit.control
 	ln -sf . $(PKGNAME)
 	mkdir -p dist
 	rm -f $(PKG_TGZ)
 	tar zcvf $(PKG_TGZ) $(addprefix $(PKGNAME)/,$^)
 	rm $(PKGNAME)
 
-PGXS := $(shell $(PG_CONFIG) --pgxs)
-include $(PGXS)

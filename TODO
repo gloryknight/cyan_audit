@@ -1,4 +1,3 @@
-Add support for logging schemas other than public
 Fix usage message on all tools when connect info is incorrect
 Make -m option to cyanaudit_dump optional
 Allow PKs of arbirary type
