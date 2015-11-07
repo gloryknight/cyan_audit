@@ -456,7 +456,7 @@ returns void as
 declare
     my_function_name    varchar;
 begin
-    my_function_name := 'fn_log_audit_event_' || (in_table_schema||'.'||in_table_name)::regclass::oid::text;
+    my_function_name := 'fn_log_audit_event_' || md5(in_table_schema||'.'||in_table_name);
 
     set client_min_messages to warning;
 
@@ -507,8 +507,9 @@ use strict;
 
 my $table_name = $_[0];
 my $table_schema = $_[1];
-my $table_oid_rv = spi_exec_query( "select '$table_schema.$table_name'::regclass::oid" );
-my $table_oid = $table_oid_rv->{rows}[0]->{oid};
+my $table_md5_rv = spi_exec_query( "select md5('$table_schema.$table_name') as md5" );
+my $table_md5 = $table_md5_rv->{rows}[0]->{md5};
+my $fn_name = "fn_log_audit_event_${table_md5}()";
 
 return if $table_name =~ /tb_audit_.*/;
 
@@ -523,7 +524,7 @@ my $table_rv = spi_exec_query($table_q);
 
 if( $table_rv->{'processed'} == 0 )
 {
-    elog(NOTICE, "Cannot audit invalid table '$table_schema.$table_name'");
+    elog(ERROR, "Cannot audit invalid table '$table_schema.$table_name'");
     return;
 }
 
@@ -546,11 +547,31 @@ if( $colnames_rv->{'processed'} == 0 )
 my $pk_q = "select @extschema@.fn_get_table_pk_cols('$table_name', '$table_schema') as pk_cols ";
 my $pk_rv = spi_exec_query($pk_q);
 my $pk_cols = $pk_rv->{'rows'}[0]{'pk_cols'};
+
+unless( $pk_cols and @$pk_cols )
+{
+    my $bogus_fn_q = <<EOF;
+CREATE OR REPLACE FUNCTION @extschema@.$fn_name 
+returns trigger as
+ \$bogus\$ 
+begin
+    -- BOGUS FUNCTION
+    return NEW; 
+end; 
+ \$bogus\$ 
+    language plpgsql;
+EOF
+
+    eval{ spi_exec_query( $bogus_fn_q ) };
+    elog(ERROR, "Creating bogus function $fn_name: $@") if ($@);
+    return;
+}
+
 my $pk_cols_qualified_quoted = join( ',', map { 'my_row.' . quote_ident($_) . "::varchar" } @$pk_cols );
 
 
 my $fn_q = <<EOF;
-CREATE OR REPLACE FUNCTION @extschema@.fn_log_audit_event_${table_oid}()
+CREATE OR REPLACE FUNCTION @extschema@.$fn_name
 returns trigger as
  \$_\$
 -- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT
@@ -566,8 +587,6 @@ BEGIN
     else
         my_row := OLD;
     end if;
-
-    my_pk_vals := ARRAY[ $pk_cols_qualified_quoted ];
 
     if( TG_OP = 'DELETE' ) then
         my_new_row := OLD;
@@ -589,6 +608,7 @@ BEGIN
 
     my_recorded := clock_timestamp();
 
+    my_pk_vals := ARRAY[ $pk_cols_qualified_quoted ];
 EOF
 
 foreach my $row (@{$colnames_rv->{'rows'}})
@@ -640,12 +660,12 @@ spi_exec_query( 'SET client_min_messages to WARNING' );
 eval { spi_exec_query($fn_q) };
 elog(ERROR, $@) if $@;
 
-my $tg_q = "CREATE TRIGGER tr_log_audit_event_${table_oid} "
+my $tg_q = "CREATE TRIGGER tr_log_audit_event_${table_md5} "
          . "   after insert or update or delete on $table_schema.$table_name for each row "
-         . "   execute procedure @extschema@.fn_log_audit_event_${table_oid}()";
+         . "   execute procedure @extschema@.$fn_name";
 eval { spi_exec_query($tg_q) };
 
-my $ext_q = "ALTER EXTENSION cyanaudit ADD FUNCTION @extschema@.fn_log_audit_event_${table_oid}()";
+my $ext_q = "ALTER EXTENSION cyanaudit ADD FUNCTION @extschema@.$fn_name";
 
 eval { spi_exec_query($ext_q) };
 
@@ -653,51 +673,125 @@ spi_exec_query( 'SET client_min_messages to NOTICE' );
  $_$
     language 'plperl';
 
+-- TODO: Above, only run CREATE TRIGGER if the trigger doesn't already exist
 
 
 -- fn_update_audit_fields
 CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields
 (
-    in_schema varchar default 'public'
+    in_schemas           varchar[] default null,
+    in_allow_deactivate  boolean default true
 ) 
 returns void as
  $_$
+declare
+    my_deactivated_field varchar;
+    my_schemas           varchar[];
+    my_stale_field_count integer;
 begin
-    with tt_audit_fields as
-    (
-        select coalesce(
-                   af.audit_field,
-                   @extschema@.fn_get_or_create_audit_field(
-                       c.relname::varchar,
-                       a.attname::varchar,
-                       n.nspname::varchar
+    perform pg_advisory_xact_lock('@extschema@.tb_audit_field'::regclass::bigint);
+
+    my_schemas = in_schemas;
+    
+    if my_schemas is null or array_length(in_schemas, 1) = 0 then
+        select array_agg( distinct table_schema )::varchar[]
+          into my_schemas
+          from @extschema@.tb_audit_field;
+    end if;
+
+    for my_deactivated_field in
+        -- Make list of all fields in passed-in schemas
+        with tt_all_fields as
+        (
+            select c.relname::varchar as table_name,
+                   a.attname::varchar as column_name,
+                   n.nspname::varchar as table_schema
+              from pg_attribute a
+              join pg_class c
+                on a.attrelid = c.oid
+              join pg_namespace n
+                on c.relnamespace = n.oid
+             where n.nspname::varchar = any(my_schemas)
+        ),
+        tt_new_fields as
+        (
+           -- Create entries in tb_audit_field for all existing fields
+           -- active flags will be set to default values
+            select @extschema@.fn_get_or_create_audit_field(
+                        ttaf.table_name,
+                        ttaf.column_name,
+                        ttaf.table_schema
                    )
-               ) as audit_field,
-               (a.attrelid is null and af.active) as stale
-          from pg_attribute a
-          join pg_class c
-            on a.attrelid = c.oid
+              from tt_all_fields ttaf
+         left join @extschema@.tb_audit_field af
+                on ttaf.table_schema = af.table_schema
+               and ttaf.table_name = af.table_name
+               and ttaf.column_name = af.column_name
+             where af.audit_field is null
+        ),
+        -- Get list of audit_fields in passed-in schemas that are stale
+        tt_stale_fields as
+        (
+            select af.audit_field,
+                   af.table_schema,
+                   af.table_name,
+                   af.column_name
+              from @extschema@.tb_audit_field af
+         left join tt_all_fields ttaf
+                on ttaf.table_schema = af.table_schema
+               and ttaf.table_name = af.table_name
+               and ttaf.column_name = af.column_name
+             where ttaf.column_name is null
+               and af.table_schema = any(my_schemas)
+               and af.active
+               and in_allow_deactivate
+          order by af.table_schema,
+                   af.table_name,
+                   af.column_name
+        )
+        update @extschema@.tb_audit_field af
+           set active = false
+          from tt_stale_fields ttsf
+         where ttsf.audit_field = af.audit_field
+     returning 'Disabled stale field: ' || af.table_schema || '.' || af.table_name || '.' || af.column_name
+    loop
+        raise notice '%', my_deactivated_field;
+    end loop;
+
+    with tt_pk_tables as
+    (
+        select c.relname::varchar as table_name,
+               n.nspname::varchar as table_schema,
+               'fn_log_audit_event_' || md5(n.nspname::varchar || '.' || c.relname::varchar) as proname
+          from pg_class c
           join pg_namespace n
             on c.relnamespace = n.oid
-           and n.nspname::varchar = in_schema
           join pg_constraint cn
             on cn.conrelid = c.oid
            and cn.contype = 'p'
-           and a.attnum > 0
-           and a.attisdropped is false
-     full join @extschema@.tb_audit_field af
-            on c.relname::varchar = af.table_name
-           and a.attname::varchar = af.column_name
-           and n.nspname::varchar = af.table_schema
-         where af.table_schema = in_schema
-            or af.table_schema is null
+         where n.nspname::varchar = any(my_schemas)
+    ),
+    tt_bogus_function_tables as
+    (
+        select table_schema,
+               table_name
+          from tt_pk_tables tt
+          join pg_proc p
+            on tt.proname = p.proname
+          join pg_namespace n
+            on p.pronamespace = n.oid
+         where n.nspname = '@extschema@'
+           and prosrc like '%-- BOGUS%'
     )
     update @extschema@.tb_audit_field af
-       set active = false
-      from tt_audit_fields afs
-     where afs.stale
-       and afs.audit_field = af.audit_field;
-end
+       set active = true
+      from tt_bogus_function_tables tt
+     where af.active = true
+       and tt.table_name = af.table_name
+       and tt.table_schema = af.table_schema;
+
+    return;
+end;
  $_$
     language 'plpgsql';
 
@@ -948,6 +1042,11 @@ begin
          where table_schema = NEW.table_schema
            and table_name = NEW.table_name
            and column_name = NEW.column_name;
+
+        if NEW.active is false then
+            raise notice 'Setting tb_audit_field.active = false for %.%.% because column does not exist',
+                NEW.table_schema, NEW.table_name, NEW.column_name;
+        end if;
     end if;
 
     return NEW;
@@ -986,10 +1085,7 @@ begin
 
     -- If table exists, update trigger on the table.
     if found then
-        -- Quiet messaeges about truncated names
-        set client_min_messages to warning;
         perform @extschema@.fn_update_audit_event_log_trigger_on_table(my_row.table_name, my_row.table_schema);
-        set client_min_messages to notice;
     end if;
     return new;
 end
@@ -1008,30 +1104,38 @@ CREATE TRIGGER tr_audit_event_log_trigger_updater
 
 -- EVENT TRIGGER
 
-CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger()
+
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger_drop()
 returns event_trigger
 language plpgsql as
    $function$
-declare
-    my_schema   varchar;
 begin
-    perform @extschema@.fn_update_audit_fields(table_schema)
-       from (
-                select distinct table_schema
-                  from @extschema@.tb_audit_field
-                 where audit_field > 0
-            ) schemas;
+    perform @extschema@.fn_update_audit_fields( null, true );
 exception
      when insufficient_privilege
      then return;
 end
    $function$;
 
-DROP EVENT TRIGGER IF EXISTS tr_update_audit_fields;
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger()
+returns event_trigger
+language plpgsql as
+   $function$
+begin
+    perform @extschema@.fn_update_audit_fields( null, false );
+exception
+     when insufficient_privilege
+     then return;
+end
+   $function$;
 
 CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end
-    WHEN TAG IN ('ALTER TABLE', 'CREATE TABLE', 'DROP TABLE')
+    WHEN TAG IN ('ALTER TABLE', 'CREATE TABLE')
     EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger();
+
+CREATE EVENT TRIGGER tr_update_audit_fields_delete ON sql_drop
+    EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger_drop();
+    
 
 
 
