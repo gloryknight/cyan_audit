@@ -16,20 +16,6 @@ begin
         raise exception 'Cyan Audit requires PostgreSQL 9.3.3 or above';
     end if;
 
-    -- Install pl/perl if necessary
-    if (select count(*) from pg_language where lanname = 'plperl') = 0 then
-        begin
-            create language plperl;
-            alter extension cyanaudit drop language plperl;
-            alter extension cyanaudit drop function plperl_call_handler();
-            alter extension cyanaudit drop function plperl_inline_handler(internal);
-            alter extension cyanaudit drop function plperl_validator(oid);
-        exception
-            when undefined_object then
-                 raise exception 'Cyan Audit requires lanugage plperl.';
-        end;
-    end if;
-
     -- Make sure we are installing to a non-public schema
     if '@extschema@' = 'public' then
         raise exception 'Must install to schema other than public, e.g. cyanaudit';
@@ -495,185 +481,200 @@ end
 
 
 
+-- fn_get_trigger_function_declaration
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_trigger_function_declaration
+(
+    in_function_name    varchar,
+    in_pk_cols          varchar[],
+    in_audit_fields     varchar[],
+    in_column_names     varchar[]
+)
+returns text
+language sql immutable strict
+as $_$
+ select 'CREATE OR REPLACE FUNCTION @extschema@.' || in_function_name || ' returns trigger '
+     || 'language plpgsql '
+     || 'as $function$ '
+     || 'DECLARE '
+     || '    my_pk_vals          varchar[]; '
+     || '    my_row              record; '
+     || '    my_old_row          record; '
+     || '    my_new_row          record; '
+     || '    my_recorded         timestamp; '
+     || 'BEGIN '
+     || '    -- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT '
+     || '    if( TG_OP = ''DELETE'' ) then '
+     || '        my_new_row := OLD; '
+     || '    else '
+     || '        my_new_row := NEW; '
+     || '    end if; '
+     || '    if( TG_OP = ''INSERT'' ) then '
+     || '        my_row := NEW; '
+     || '        my_old_row := NEW; '
+     || '    else '
+     || '        my_old_row := OLD; '
+     || '        my_row := OLD; '
+     || '    end if;  '
+     || '    ' || ' '
+     || '    if current_setting(''cyanaudit.enabled'') = ''0'' then '
+     || '        return my_new_row; '
+     || '    end if; '
+     || ' '
+     || '    perform @extschema@.fn_set_last_audit_txid(); '
+     || ' '
+     || '    my_recorded := clock_timestamp(); '
+     || ' '
+     || '    my_pk_vals := ARRAY[ ' || (select string_agg( ',', quote_ident(unnest(in_pk_cols)) )) || ' ];  '
+     || '    ' 
+     || ( select string_agg( E'\n\n', ' '
+     || '    IF (TG_OP = ''INSERT'' AND '
+     || '        my_new_row.${column_name} IS NOT NULL) OR '
+     || '       (TG_OP = ''UPDATE'' AND '
+     || '        my_new_row.${column_name}::text IS DISTINCT FROM '
+     || '        my_old_row.${column_name}::text) OR '
+     || '       (TG_OP = ''DELETE'' AND '
+     || '        my_old_row.${column_name} IS NOT NULL) '
+     || '    THEN '
+     || '        perform @extschema@.fn_new_audit_event( '
+     || '                    ' || quote_ident(unnest(in_audit_fields)) || ', '
+     || '                    my_pk_vals, '
+     || '                    my_recorded, '
+     || '                    TG_OP, '
+     || '                    my_old_row.' || quote_ident(unnest(in_column_names)) || ', '
+     || '                    my_new_row.' || quote_ident(unnest(in_column_names)) || ' '
+     || '                ); '
+     || '    END IF; ' ))
+     || ' '
+     || '    return NEW; '
+     || 'EXCEPTION '
+     || '    WHEN undefined_function THEN '
+     || '         raise notice ''Undefined function call. Please reinstall cyanaudit.''; '
+     || '         return NEW; '
+     || '    WHEN undefined_column THEN '
+     || '         raise notice ''Undefined column. Please run fn_update_audit_fields() as superuser.''; '
+     || '         return NEW; '
+     || '    WHEN undefined_object THEN '
+     || '         raise notice ''Cyan Audit configuration invalid. Logging disabled.''; '
+     || '         return NEW; '
+     || 'END '
+     || ' $function$ ';
+$_$;
+
+
+
+
 -- fn_update_audit_event_log_trigger_on_table
 CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_event_log_trigger_on_table
 (
     in_table_name   varchar,
     in_table_schema varchar default 'public'
 )
-returns void as
- $_$
-use strict;
-
-my $table_name = $_[0];
-my $table_schema = $_[1];
-my $table_md5_rv = spi_exec_query( "select md5('$table_schema.$table_name') as md5" );
-my $table_md5 = $table_md5_rv->{rows}[0]->{md5};
-my $fn_name = "fn_log_audit_event_${table_md5}()";
-
-return if $table_name =~ /tb_audit_.*/;
-
-my $table_q = "select relname "
-            . "  from pg_class c "
-            . "  join pg_namespace n "
-            . "    on c.relnamespace = n.oid "
-            . " where n.nspname = '$table_schema' "
-            . "   and c.relname = '$table_name' ";
-
-my $table_rv = spi_exec_query($table_q);
-
-if( $table_rv->{'processed'} == 0 )
-{
-    elog(ERROR, "Cannot audit invalid table '$table_schema.$table_name'");
-    return;
-}
-
-my $colnames_q = "select audit_field, column_name "
-               . "  from @extschema@.tb_audit_field "
-               . " where table_name = '$table_name' "
-               . "   and table_schema = '$table_schema' "
-               . "   and active = true ";
-
-my $colnames_rv = spi_exec_query($colnames_q);
-
-if( $colnames_rv->{'processed'} == 0 )
-{
-    my $q = "select @extschema@.fn_drop_audit_event_log_trigger('$table_name', '$table_schema')";
-    eval{ spi_exec_query($q) };
-    elog(ERROR, "fn_drop_audit_event_log_trigger: $@") if($@);
-    return;
-}
-
-my $pk_q = "select @extschema@.fn_get_table_pk_cols('$table_name', '$table_schema') as pk_cols ";
-my $pk_rv = spi_exec_query($pk_q);
-my $pk_cols = $pk_rv->{'rows'}[0]{'pk_cols'};
-
-unless( $pk_cols and @$pk_cols )
-{
-    my $bogus_fn_q = <<EOF;
-CREATE OR REPLACE FUNCTION @extschema@.$fn_name 
-returns trigger as
- \$bogus\$ 
+returns void 
+language plpgsql strict
+as $_$
+declare
+    my_audit_fields     varchar[];
+    my_column_names     varchar[];
+    my_pk_colnames      varchar[];
+    my_trigger_name     varchar;
+    my_function_name    varchar;
 begin
-    -- BOGUS FUNCTION
-    return NEW; 
-end; 
- \$bogus\$ 
-    language plpgsql;
-EOF
+    my_trigger_name := 'fn_log_audit_event_ ' || md5(in_table_schema||'.'||in_table_name);
+    my_function_name := 'tr_log_audit_event_ ' || md5(in_table_schema||'.'||in_table_name);
 
-    eval{ spi_exec_query( $bogus_fn_q ) };
-    elog(ERROR, "Creating bogus function $fn_name: $@") if ($@);
-    return;
-}
-
-my $pk_cols_qualified_quoted = join( ',', map { 'my_row.' . quote_ident($_) . "::varchar" } @$pk_cols );
-
-
-my $fn_q = <<EOF;
-CREATE OR REPLACE FUNCTION @extschema@.$fn_name
-returns trigger as
- \$_\$
--- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT
-DECLARE
-    my_pk_vals          varchar[];
-    my_row              record;
-    my_old_row          record;
-    my_new_row          record;
-    my_recorded         timestamp;
-BEGIN
-    if( TG_OP = 'INSERT' ) then
-        my_row := NEW;
-    else
-        my_row := OLD;
+    if in_table_schema = '@extschema@' then
+        raise exception 'cyanaudit: Refusing to audit Cyan Audit table %.%',
+            in_table_name, in_table_schema;
     end if;
 
-    if( TG_OP = 'DELETE' ) then
-        my_new_row := OLD;
-    else
-        my_new_row := NEW;
+    perform *
+       from pg_class c
+       join pg_namespace n
+         on c.relnamespace = n.oid
+      where c.relname = in_table_name
+        and n.nspname = in_table_schema;
+
+    if not found then
+        raise exception 'cyanaudit: Cannot audit nonexistent table %.%',
+            in_table_name, in_table_schema;
     end if;
 
-    if( TG_OP = 'INSERT' ) then
-        my_old_row := NEW;
-    else
-        my_old_row := OLD;
+    my_pk_colnames := @extschema@.fn_get_table_pk_cols( in_table_name, in_table_schema );
+        
+    if array_length( my_pk_colnames, 1 ) = 0 then
+        execute 'CREATE OR REPLACE FUNCTION @extschema@.$1 returns trigger language plpgsql as '
+             || '$$ begin /*BOGUS*/ return NEW; end; $$';
+        return;
     end if;
 
-    if current_setting('cyanaudit.enabled') = '0' then
-        return my_new_row;
-    end if;
+    select array_agg(audit_field),
+           array_agg(column_names)
+      into my_audit_fields,
+           my_column_names
+      from @extschema@.tb_audit_field
+     where active
+       and table_schema = in_table_schema
+       and table_name = in_table_name;
 
-    perform @extschema@.fn_set_last_audit_txid();
+    execute @extschema@.fn_get_trigger_function_declaration (
+        my_function_name,
+        my_pk_colnames,
+        my_audit_fields,
+        my_column_names
+    );
 
-    my_recorded := clock_timestamp();
+    perform @extschema@.fn_create_audit_trigger_on_table( 
+        quote_nullable( in_table_schema ), 
+        quote_nullable( in_table_name ) 
+    );
+end
+ $_$;
 
-    my_pk_vals := ARRAY[ $pk_cols_qualified_quoted ];
-EOF
 
-foreach my $row (@{$colnames_rv->{'rows'}})
-{
-    my $column_name = $row->{'column_name'};
-    my $audit_field = $row->{'audit_field'};
 
-    $fn_q .= <<EOF;
-    IF (TG_OP = 'INSERT' AND
-        my_new_row.${column_name} IS NOT NULL) OR
-       (TG_OP = 'UPDATE' AND
-        my_new_row.${column_name}::text IS DISTINCT FROM
-        my_old_row.${column_name}::text) OR
-       (TG_OP = 'DELETE' AND
-        my_old_row.${column_name} IS NOT NULL)
-    THEN
-        perform @extschema@.fn_new_audit_event(
-                    $audit_field,
-                    my_pk_vals,
-                    my_recorded,
-                    TG_OP,
-                    my_old_row.$column_name,
-                    my_new_row.$column_name
-                );
-    END IF;
 
-EOF
-}
-
-$fn_q .= <<EOF;
-    return NEW;
-EXCEPTION
-    WHEN undefined_function THEN
-         raise notice 'Undefined function call. Please reinstall cyanaudit.';
-         return NEW;
-    WHEN undefined_column THEN
-         raise notice 'Undefined column. Please run fn_update_audit_fields() as superuser.';
-         return NEW;
-    WHEN undefined_object THEN
-         raise notice 'Cyan Audit configuration invalid. Logging disabled.';
-         return NEW;
-END
- \$_\$
-    language 'plpgsql';
-EOF
-
-spi_exec_query( 'SET client_min_messages to WARNING' );
-
-eval { spi_exec_query($fn_q) };
-elog(ERROR, $@) if $@;
-
-my $tg_q = "CREATE TRIGGER tr_log_audit_event_${table_md5} "
-         . "   after insert or update or delete on $table_schema.$table_name for each row "
-         . "   execute procedure @extschema@.$fn_name";
-eval { spi_exec_query($tg_q) };
-
-my $ext_q = "ALTER EXTENSION cyanaudit ADD FUNCTION @extschema@.$fn_name";
-
-eval { spi_exec_query($ext_q) };
-
-spi_exec_query( 'SET client_min_messages to NOTICE' );
+CREATE OR REPLACE FUNCTION @extschema@.fn_create_audit_trigger_on_table
+(
+    in_table_schema varchar,
+    in_table_name   varchar
+)
+returns void as 
  $_$
-    language 'plperl';
+declare
+    my_trigger_name varchar;
+    my_function_name varchar;
+    my_trigger_row  record;
+begin
+    my_trigger_name  := 'tr_log_audit_event_' || md5( in_table_schema||'.'||in_table_name );
+    my_function_name := 'fn_log_audit_event_' || md5( in_table_schema||'.'||in_table_name );
 
--- TODO: Above, only run CREATE TRIGGER if the trigger doesn't already exist
+    -- Check if the trigger exists already
+    perform *
+       from pg_trigger t
+       join pg_class c
+         on t.tgrelid = c.oid
+       join pg_namespace n
+         on c.relnamespace = c.relnamespace
+      where t.tgname = my_trigger_name
+        and n.nspname = in_table_schema
+        and c.relname = in_table_name;
+
+    if found then return; end if;
+
+    execute 'drop trigger if exists $1' using my_trigger_name;
+
+    execute 'CREATE TRIGGER $1 '
+         || '   after insert or update or delete on $2.$3 for each row '
+         || '   execute procedure @extschema@.$4 '
+      using my_trigger_name,
+            in_table_schema,
+            in_table_name,
+            my_function_name;
+    
+    execute 'ALTER EXTENSION cyanaudit ADD FUNCTION @extschema@.$1' using my_function_name;
+end
+ $_$
+    language plpgsql strict;
 
 
 -- fn_update_audit_fields
