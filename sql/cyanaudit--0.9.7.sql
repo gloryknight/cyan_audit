@@ -1,7 +1,6 @@
 ------------------------
 ------ FUNCTIONS ------
 ------------------------
-
 do language plpgsql
  $$
 declare
@@ -28,7 +27,6 @@ begin
     execute my_command || 'user_table_username_col = '''' ';
 end;
  $$;
-
 
 -- fn_set_audit_uid
 CREATE OR REPLACE FUNCTION @extschema@.fn_set_audit_uid
@@ -226,6 +224,29 @@ cross join tt_conkey c
 
 
 
+/*
+-- fn_get_loggable_columns
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_loggable_columns()
+RETURNS 
+(
+    out_
+       perform *
+          from pg_attribute a
+          join pg_class c
+            on a.attrelid = c.oid
+          join pg_namespace n
+            on c.relnamespace = n.oid
+          join pg_constraint cn
+            on conrelid = c.oid
+         where n.nspname::varchar = NEW.table_schema
+           and c.relname::varchar = NEW.table_name
+           and a.attname::varchar = NEW.column_name
+           and cn.contype = 'p'
+           and a.attnum > 0
+           and a.attisdropped is false;
+*/
+
+
 -- fn_get_or_create_audit_transaction_type
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_transaction_type
 (
@@ -341,9 +362,9 @@ returns setof varchar as
 -- fn_get_or_create_audit_field
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_field
 (
+    in_table_schema     varchar,
     in_table_name       varchar,
-    in_column_name      varchar,
-    in_table_schema     varchar default 'public'
+    in_column_name      varchar
 )
 returns integer as
  $_$
@@ -379,7 +400,6 @@ end
  $_$
     language 'plpgsql';
         
-
 
 -- fn_new_audit_event
 CREATE OR REPLACE FUNCTION @extschema@.fn_new_audit_event
@@ -417,17 +437,17 @@ RETURNS TRIGGER
 language plpgsql
 AS $_$
 DECLARE
-    my_pk_cols              varchar;
-    my_column_names         varchar[];
     my_audit_fields         varchar[];
-    my_column_name          varchar;
     my_audit_field          varchar;
-    my_pk_vals              varchar[];
-    my_pk_vals_constructor  varchar;
-    my_old_row              record;
-    my_new_row              record;
-    my_row                  record;
+    my_column_names         varchar[];
+    my_column_name          varchar;
     my_do_log               boolean;
+    my_new_row              record;
+    my_old_row              record;
+    my_pk_cols              varchar;
+    my_pk_vals_constructor  varchar;
+    my_pk_vals              varchar[];
+    my_row                  record;
 BEGIN
     -- We could just munge the string, but part of me feels dirty doing that.
     my_pk_cols      := TG_ARGS[1]::varchar[];
@@ -516,255 +536,190 @@ $_$;
 -- fn_get_trigger_function_declaration
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_trigger_function_declaration
 (
-    in_function_name    varchar,
-    in_pk_cols          varchar[],
+    in_function_name character varying,
+    in_pk_cols character varying[],
+    in_audit_fields character varying[],
+    in_column_names character varying[]
+)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE STRICT
+AS $_$
+
+ select format(
+
+   $TRFUNCDECL$
+
+        CREATE OR REPLACE FUNCTION @extschema@.%I() returns trigger
+        language plpgsql
+        as $TRFUNC$
+        DECLARE
+            my_pk_vals          varchar[];
+            my_row              record;
+            my_old_row          record;
+            my_new_row          record;
+            my_recorded         timestamp;
+        BEGIN
+            -- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT
+            if( TG_OP = 'DELETE' ) then
+                my_new_row := OLD;
+            else
+                my_new_row := NEW;
+            end if;
+            if( TG_OP = 'INSERT' ) then
+                my_row := NEW;
+                my_old_row := NEW;
+            else
+                my_old_row := OLD;
+                my_row := OLD;
+            end if;
+        
+            if current_setting('cyanaudit.enabled') = '0' then
+                return my_new_row;
+            end if;
+        
+            perform @extschema@.fn_set_last_audit_txid();
+        
+            my_recorded := clock_timestamp();
+        
+            my_pk_vals := ARRAY[%s]::varchar[];
+        
+            -- Begin per-column logging code
+        %s
+            -- End per-column logging code
+        
+            return NEW;
+        EXCEPTION
+            WHEN undefined_function THEN
+                 raise notice 'Undefined function call. Please reinstall cyanaudit.';
+                 return NEW;
+            WHEN undefined_column THEN
+                 raise notice 'Undefined column. Please run fn_update_audit_fields() as superuser.';
+                 return NEW;
+            WHEN undefined_object THEN
+                 raise notice 'Cyan Audit configuration invalid. Logging disabled.';
+                 return NEW;
+        END
+         $TRFUNC$;
+        
+    $TRFUNCDECL$, -- first arg to format()
+
+    in_function_name, -- arg 2
+    (select coalesce( string_agg( 'NEW.' || quote_ident(pk_col), ','), '' )
+       from ( select unnest(in_pk_cols) as pk_col ) x ), -- arg 3
+    (select coalesce( string_agg( format( -- arg 4 ends at bottom
+
+    -- Begin per-column code to be substituted above --
+    $PERCOLUMN$
+
+            IF (TG_OP = 'INSERT' AND
+                my_new_row.%1$I IS NOT NULL) OR
+               (TG_OP = 'UPDATE' AND
+                my_new_row.%1$I::text IS DISTINCT FROM
+                my_old_row.%1$I::text) OR
+               (TG_OP = 'DELETE' AND
+                my_old_row.%1$I IS NOT NULL)
+            THEN
+                perform @extschema@.fn_new_audit_event(
+                            %2$L,
+                            my_pk_vals,
+                            my_recorded,
+                            TG_OP,
+                            my_old_row.%1$I,
+                            my_new_row.%1$I
+                        );
+            END IF;
+
+    $PERCOLUMN$,
+    -- END per-column code to be substituted above --
+
+    -- Following are the remaining args to format() for column-specific code
+    column_name,
+    audit_field), -- first arg to string_agg()
+    '' ), -- first arg to coalesce()
+    '' )
+      from ( select unnest( in_audit_fields ) as audit_field,
+                    unnest( in_column_names ) as column_name
+           ) x
+    ) -- arg 4 to outer format() that generates aggregate column-specific code block
+) -- format()
+ $_$;
+
+
+
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_trigger_declaration 
+(
+    in_table_schema     varchar, 
+    in_table_name       varchar,
+    in_pk_colnames      varchar[],
     in_audit_fields     varchar[],
-    in_column_names     varchar[]
+    in_column_names     varchar[],
+    in_trigger_name     varchar,
+    in_function_name    varchar
 )
 returns text
 language sql immutable strict
 as $_$
- select 'CREATE OR REPLACE FUNCTION @extschema@.' || in_function_name || ' returns trigger '
-     || 'language plpgsql '
-     || 'as $function$ '
-     || 'DECLARE '
-     || '    my_pk_vals          varchar[]; '
-     || '    my_row              record; '
-     || '    my_old_row          record; '
-     || '    my_new_row          record; '
-     || '    my_recorded         timestamp; '
-     || 'BEGIN '
-     || '    -- THIS FUNCTION AUTOMATICALLY GENERATED. DO NOT EDIT '
-     || '    if( TG_OP = ''DELETE'' ) then '
-     || '        my_new_row := OLD; '
-     || '    else '
-     || '        my_new_row := NEW; '
-     || '    end if; '
-     || '    if( TG_OP = ''INSERT'' ) then '
-     || '        my_row := NEW; '
-     || '        my_old_row := NEW; '
-     || '    else '
-     || '        my_old_row := OLD; '
-     || '        my_row := OLD; '
-     || '    end if;  '
-     || '    ' || ' '
-     || '    if current_setting(''cyanaudit.enabled'') = ''0'' then '
-     || '        return my_new_row; '
-     || '    end if; '
-     || ' '
-     || '    perform @extschema@.fn_set_last_audit_txid(); '
-     || ' '
-     || '    my_recorded := clock_timestamp(); '
-     || ' '
-     || '    my_pk_vals := ARRAY[ ' || (select string_agg( ',', quote_ident(unnest(in_pk_cols)) )) || ' ];  '
-     || '    ' 
-     || ( select string_agg( E'\n\n', ' '
-     || '    IF (TG_OP = ''INSERT'' AND '
-     || '        my_new_row.${column_name} IS NOT NULL) OR '
-     || '       (TG_OP = ''UPDATE'' AND '
-     || '        my_new_row.${column_name}::text IS DISTINCT FROM '
-     || '        my_old_row.${column_name}::text) OR '
-     || '       (TG_OP = ''DELETE'' AND '
-     || '        my_old_row.${column_name} IS NOT NULL) '
-     || '    THEN '
-     || '        perform @extschema@.fn_new_audit_event( '
-     || '                    ' || quote_ident(unnest(in_audit_fields)) || ', '
-     || '                    my_pk_vals, '
-     || '                    my_recorded, '
-     || '                    TG_OP, '
-     || '                    my_old_row.' || quote_ident(unnest(in_column_names)) || ', '
-     || '                    my_new_row.' || quote_ident(unnest(in_column_names)) || ' '
-     || '                ); '
-     || '    END IF; ' ))
-     || ' '
-     || '    return NEW; '
-     || 'EXCEPTION '
-     || '    WHEN undefined_function THEN '
-     || '         raise notice ''Undefined function call. Please reinstall cyanaudit.''; '
-     || '         return NEW; '
-     || '    WHEN undefined_column THEN '
-     || '         raise notice ''Undefined column. Please run fn_update_audit_fields() as superuser.''; '
-     || '         return NEW; '
-     || '    WHEN undefined_object THEN '
-     || '         raise notice ''Cyan Audit configuration invalid. Logging disabled.''; '
-     || '         return NEW; '
-     || 'END '
-     || ' $function$ ';
-$_$;
-
-
-
-
-
--- fn_setup_table_audit_trigger
-CREATE OR REPLACE FUNCTION @extschema@.fn_setup_table_audit_trigger
-(
-    in_table_name   varchar,
-    in_table_schema varchar default 'public'
-)
-returns void 
-language plpgsql strict
-as $_$
-declare
-    my_audit_fields     varchar[];
-    my_column_names     varchar[];
-    my_pk_colnames      varchar[];
-    my_trigger_name     varchar;
-    my_function_name    varchar;
-begin
-    my_trigger_name := 'fn_log_audit_event_ ' || md5(in_table_schema||'.'||in_table_name);
-    my_function_name := 'tr_log_audit_event_ ' || md5(in_table_schema||'.'||in_table_name);
-
-    -- if in_table_schema = '@extschema@' then
-    --     raise exception 'cyanaudit: Refusing to audit Cyan Audit table %.%',
-    --         in_table_name, in_table_schema;
-    -- end if;
-
-    perform *
-       from pg_class c
-       join pg_namespace n
-         on c.relnamespace = n.oid
-      where c.relname = in_table_name
-        and n.nspname = in_table_schema;
-
-    -- If table exists, update trigger on the table.
-
-    if not found then
-        raise exception 'cyanaudit: Cannot audit nonexistent table %.%',
-            in_table_name, in_table_schema;
-    end if;
-
-    my_pk_colnames := @extschema@.fn_get_table_pk_cols( in_table_name, in_table_schema );
-        
-    if( array_length( my_pk_colnames, 1 ) = 0 ) then
-        execute 'CREATE OR REPLACE FUNCTION @extschema@.' || my_function_name
-             || ' returns trigger language plpgsql as '
-             || '$$ begin /*BOGUS*/ return NEW; end; $$';
-        return;
-    end if;
-
-    select array_agg(audit_field),
-           array_agg(column_names)
-      into my_audit_fields,
-           my_column_names
-      from @extschema@.tb_audit_field
-     where active
-       and table_schema = in_table_schema
-       and table_name = in_table_name;
-
-    execute @extschema@.fn_get_trigger_function_declaration (
-        my_function_name,
-        my_pk_colnames,
-        my_audit_fields,
-        my_column_names
-    );
-
-    perform @extschema@.fn_create_audit_trigger_on_table( 
-        quote_nullable( in_table_schema ), 
-        quote_nullable( in_table_name ) 
-    );
-
-    -- TODO: Drop trigger if no longer needed
-    return;
-end
+ select format( 
+        'CREATE TRIGGER %I '
+     || 'AFTER INSERT OR UPDATE OR DELETE ON %I.%I '
+     || 'FOR EACH ROW EXECUTE PROCEDURE @extschema@.%I()',
+        in_trigger_name,
+        in_table_schema,
+        in_table_name,
+        in_function_name)
  $_$;
 
 
--- XXX don't need?
--- fn_drop_audit_event_log_trigger
-CREATE OR REPLACE FUNCTION @extschema@.fn_drop_audit_event_log_trigger 
-(
-    in_table_name   varchar,
-    in_table_schema varchar default 'public'
-)
-returns void as
- $_$
-declare
-    my_function_name    varchar;
-begin
-    my_function_name := 'fn_log_audit_event_' || md5(in_table_schema||'.'||in_table_name);
-
-    set client_min_messages to warning;
-
-    perform p.proname
-       from pg_catalog.pg_depend d
-       join pg_catalog.pg_proc p
-         on d.classid = 'pg_proc'::regclass::oid
-        and d.objid = p.oid
-       join pg_catalog.pg_extension e
-         on d.refclassid = 'pg_extension'::regclass::oid
-        and d.refobjid = e.oid
-      where e.extname = 'cyanaudit'
-        and p.proname = my_function_name;
-
-    if found then
-        execute 'alter extension cyanaudit drop function '
-             || '@extschema@.' || my_function_name|| '()';
-    end if;
-
-    perform p.proname
-       from pg_proc p
-       join pg_namespace n
-         on p.pronamespace = n.oid
-        and n.nspname = '@extschema@'
-      where p.proname = my_function_name;
-
-    if found then
-        execute 'drop function '
-             || '@extschema@.'||my_function_name||'() cascade';
-    end if;
-
-    set client_min_messages to notice;
-end
- $_$
-    language 'plpgsql';
-
+-- -- fn_drop_audit_event_log_trigger
+-- CREATE OR REPLACE FUNCTION @extschema@.fn_drop_audit_event_log_trigger 
+-- (
+--     in_table_name   varchar,
+--     in_table_schema varchar default 'public'
+-- )
+-- returns void as
+--  $_$
+-- declare
+--     my_function_name    varchar;
+-- begin
+--     my_function_name := 'fn_log_audit_event_' || md5(in_table_schema||'.'||in_table_name);
+-- 
+--     set client_min_messages to warning;
+-- 
+--     perform p.proname
+--        from pg_catalog.pg_depend d
+--        join pg_catalog.pg_proc p
+--          on d.classid = 'pg_proc'::regclass::oid
+--         and d.objid = p.oid
+--        join pg_catalog.pg_extension e
+--          on d.refclassid = 'pg_extension'::regclass::oid
+--         and d.refobjid = e.oid
+--       where e.extname = 'cyanaudit'
+--         and p.proname = my_function_name;
+-- 
+--     if found then
+--         execute 'alter extension cyanaudit drop function '
+--              || '@extschema@.' || my_function_name|| '()';
+--     end if;
+-- 
+--     perform p.proname
+--        from pg_proc p
+--        join pg_namespace n
+--          on p.pronamespace = n.oid
+--         and n.nspname = '@extschema@'
+--       where p.proname = my_function_name;
+-- 
+--     if found then
+--         execute 'drop function '
+--              || '@extschema@.'||my_function_name||'() cascade';
+--     end if;
+-- 
+--     set client_min_messages to notice;
+-- end
+--  $_$
+--     language 'plpgsql';
 
 
-
--- fn_create_audit_trigger_on_table
-CREATE OR REPLACE FUNCTION @extschema@.fn_create_audit_trigger_on_table
-(
-    in_table_schema varchar,
-    in_table_name   varchar
-)
-returns void as 
- $_$
-declare
-    my_trigger_name varchar;
-    my_function_name varchar;
-    my_trigger_row  record;
-begin
-    my_trigger_name  := 'tr_log_audit_event_' || md5( in_table_schema||'.'||in_table_name );
-    my_function_name := 'fn_log_audit_event_' || md5( in_table_schema||'.'||in_table_name );
-
-    -- Check if the trigger exists already
-    perform *
-       from pg_trigger t
-       join pg_class c
-         on t.tgrelid = c.oid
-       join pg_namespace n
-         on c.relnamespace = c.relnamespace
-      where t.tgname = my_trigger_name
-        and n.nspname = in_table_schema
-        and c.relname = in_table_name;
-
-    if found then return; end if;
-
-    execute 'drop trigger if exists $1' using my_trigger_name;
-
-    execute 'CREATE TRIGGER $1 '
-         || '   after insert or update or delete on $2.$3 for each row '
-         || '   execute procedure @extschema@.$4 '
-      using my_trigger_name,
-            in_table_schema,
-            in_table_name,
-            my_function_name;
-    
-    execute 'ALTER EXTENSION cyanaudit ADD FUNCTION @extschema@.$1' using my_function_name;
-end
- $_$
-    language plpgsql strict;
 
 
 -- fn_update_audit_fields
@@ -772,7 +727,7 @@ end
 -- If passed-in schema is null, create or update for all already-known schemas.
 CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields
 (
-    in_schemas           varchar[] default null,
+    in_schema            varchar default null,
     in_allow_deactivate  boolean default true
 ) 
 returns void as
@@ -785,72 +740,49 @@ begin
     -- Keep two of these functions from running at the same time
     -- perform pg_advisory_xact_lock('@extschema@.tb_audit_field'::regclass::bigint);
 
-    my_schemas = in_schemas;
-    
-    if my_schemas is null or array_length(in_schemas, 1) = 0 then
-        select array_agg( distinct table_schema )::varchar[]
-          into my_schemas
-          from @extschema@.tb_audit_field;
-    end if;
+    select case when in_schema is not null
+                then ARRAY[ in_schema ]
+                else array_agg( distinct table_schema )
+           end
+      into my_schemas
+      from @extschema@.tb_audit_field;
 
-    for my_deactivated_field in
-        -- Make list of all fields in passed-in schemas
-        with tt_all_fields as
-        (
-            select c.relname::varchar as table_name,
-                   a.attname::varchar as column_name,
-                   n.nspname::varchar as table_schema
-              from pg_attribute a
-              join pg_class c
-                on a.attrelid = c.oid
-              join pg_namespace n
-                on c.relnamespace = n.oid
-             where n.nspname::varchar = any(my_schemas)
-        ),
-        tt_new_fields as
-        (
-           -- Create entries in tb_audit_field for all existing fields
-           -- active flags will be set to default values
-            select @extschema@.fn_get_or_create_audit_field(
-                        ttaf.table_name,
-                        ttaf.column_name,
-                        ttaf.table_schema
-                   )
-              from tt_all_fields ttaf
-         left join @extschema@.tb_audit_field af
-                on ttaf.table_schema = af.table_schema
-               and ttaf.table_name = af.table_name
-               and ttaf.column_name = af.column_name
-             where af.audit_field is null
-        ),
-        -- Get list of audit_fields in passed-in schemas that are stale
-        tt_stale_fields as
-        (
-            select af.audit_field,
-                   af.table_schema,
-                   af.table_name,
-                   af.column_name
-              from @extschema@.tb_audit_field af
-         left join tt_all_fields ttaf
-                on ttaf.table_schema = af.table_schema
-               and ttaf.table_name = af.table_name
-               and ttaf.column_name = af.column_name
-             where ttaf.column_name is null
-               and af.table_schema = any(my_schemas)
-               and af.active
-               and in_allow_deactivate
-          order by af.table_schema,
-                   af.table_name,
-                   af.column_name
-        )
-        update @extschema@.tb_audit_field af
-           set active = false
-          from tt_stale_fields ttsf
-         where ttsf.audit_field = af.audit_field
-     returning 'Disabled stale field: ' || af.table_schema || '.' || af.table_name || '.' || af.column_name
-    loop
-        raise notice '%', my_deactivated_field;
-    end loop;
+    with tt_audit_fields as
+    (
+        select coalesce
+               (
+                    af.audit_field,
+                    @extschema@.fn_get_or_create_audit_field
+                    ( 
+                        n.nspname::varchar,
+                        c.relname::varchar,
+                        a.attname::varchar
+                    )
+               ) as audit_field,
+               (a.attnum is null and af.active) as stale
+          from (
+                    pg_class c
+               join pg_attribute a
+                 on a.attrelid = c.oid
+                and a.attnum > 0
+                and a.attisdropped is false
+               join pg_namespace n
+                 on c.relnamespace = n.oid
+                and n.nspname::varchar = any( my_schemas )
+               join pg_constraint cn
+                 on conrelid = c.oid
+                and cn.contype = 'p'
+               ) 
+     full join @extschema@.tb_audit_field af
+            on af.table_schema = n.nspname::varchar
+           and af.table_name   = c.relname::varchar
+           and af.column_name  = a.attname::varchar
+    )
+    update @extschema@.tb_audit_field af
+       set active = false
+      from tt_audit_fields ttaf
+     where af.audit_field = ttaf.audit_field
+       and ttaf.stale;
 
     with tt_pk_tables as
     (
@@ -981,7 +913,6 @@ create index tb_audit_event_current_recorded_idx
 create index tb_audit_event_current_audit_field_idx
     on @extschema@.tb_audit_event_current(audit_field);
 
-drop trigger if exists tr_redirect_audit_events on @extschema@.tb_audit_event;
 create trigger tr_redirect_audit_events 
     before insert on @extschema@.tb_audit_event
     for each row execute procedure @extschema@.fn_redirect_audit_events();
@@ -1114,6 +1045,13 @@ begin
         end if;
     end if;
     
+    -- This will give a syntax error if schema name contains an apostrophe. But
+    -- hopefully nobody will be stupid enough to name a schema that way.
+    if NEW.table_schema = '@extschema@' then
+        raise exception 'cyanaudit: Refusing to audit Cyan Audit table %.%',
+            NEW.table_name, NEW.table_schema;
+    end if;
+
     -- Got to double check our value if it's true
     if NEW.active = true then
         -- active if the column is currently real in the db, inactive otherwise
@@ -1123,11 +1061,24 @@ begin
             on a.attrelid = c.oid
           join pg_namespace n
             on c.relnamespace = n.oid
+          join pg_constraint cn
+            on conrelid = c.oid
          where n.nspname::varchar = NEW.table_schema
-           and table_name::varchar = NEW.table_name
-           and column_name::varchar = NEW.column_name;
+           and c.relname::varchar = NEW.table_name
+           and a.attname::varchar = NEW.column_name
+           and cn.contype = 'p'
+           and a.attnum > 0
+           and a.attisdropped is false;
+
 
         NEW.active := found;
+
+        if NEW.active is false then
+            raise notice 'cyanaudit: Refusing to activate nonexistent column %.%.%',
+                NEW.table_schema, NEW.table_name, NEW.column_name;
+        else
+            -- TODO: we might be in pg_restore. what do we do now?
+        end if;
     elsif NEW.active is null then
         -- Sensible default value for "active" is important to avoid freaking people out:
 
@@ -1160,7 +1111,7 @@ end
     language plpgsql;
 
 
-CREATE TRIGGER tr_check_audit_field_validity
+CREATE TRIGGER tr_before_audit_field_change
     BEFORE INSERT OR UPDATE ON @extschema@.tb_audit_field
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_before_audit_field_change();
 
@@ -1171,15 +1122,79 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_after_audit_field_change()
 returns trigger 
 language plpgsql
 as $_$
+declare
+    my_pk_colnames      varchar[];
+    my_trigger_name     varchar;
+    my_function_name    varchar;
+    my_audit_fields     varchar[];
+    my_column_names     varchar[];
 begin
-    perform @extschema@.fn_setup_table_audit_trigger(NEW.table_name, NEW.table_schema);
+    my_trigger_name  := 'tr_log_audit_event_' || md5(NEW.table_schema||'.'||NEW.table_name);
+    my_function_name := 'fn_log_audit_event_' || md5(NEW.table_schema||'.'||NEW.table_name);
+
+    if NEW.active then
+        my_pk_colnames := @extschema@.fn_get_table_pk_cols( NEW.table_name, NEW.table_schema );
+            
+        -- If table has no PK column, create a bogus function so pg_restore will
+        -- have something to point those triggers at.
+        if( array_length( my_pk_colnames, 1 ) = 0 ) then
+            execute 'CREATE OR REPLACE FUNCTION @extschema@.' || quote_ident(my_function_name) || '()'
+                 || ' returns trigger language plpgsql as '
+                 || E'$$ begin --BOGUS\nreturn NEW; end; $$';
+            return NEW;
+        end if;
+
+        -- Get a list of audit fields and column names for this table
+        select array_agg(audit_field),
+               array_agg(column_name)
+          into my_audit_fields,
+               my_column_names
+          from @extschema@.tb_audit_field
+         where active
+           and table_schema = NEW.table_schema
+           and table_name = NEW.table_name;
+
+        -- Create the trigger function with that info
+        execute @extschema@.fn_get_trigger_function_declaration (
+            my_function_name,
+            my_pk_colnames,
+            my_audit_fields,
+            my_column_names
+        );
+
+        -- Create the table trigger (if it doesn't exist) to call the function
+        execute format( 'DROP TRIGGER IF EXISTS %I ON %I.%I', 
+                        my_trigger_name, 
+                        NEW.table_schema,
+                        NEW.table_name
+                      );
+        execute @extschema@.fn_get_trigger_declaration (
+            NEW.table_schema, 
+            NEW.table_name,
+            my_pk_colnames,
+            my_audit_fields,
+            my_column_names,
+            my_trigger_name,
+            my_function_name
+        );
+    else
+        perform *
+           from @extschema@.tb_audit_field
+          where table_name = NEW.table_name
+            and active;
+
+        if not found then
+            execute format( 'DROP TRIGGER IF EXISTS %I', my_trigger_name );
+            execute format( 'DROP FUNCTION IF EXISTS %I', my_function_name );
+        end if;
+    end if;
+
     return NEW;
 end
- $_$
-    language 'plpgsql';
+ $_$;
 
 
-CREATE TRIGGER tr_audit_event_log_trigger_updater
+CREATE TRIGGER tr_after_audit_field_cange
     AFTER INSERT OR UPDATE on @extschema@.tb_audit_field
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_after_audit_field_change();
 
@@ -1228,9 +1243,7 @@ grant usage on schema @extschema@ to public;
 
 grant usage on all sequences in schema @extschema@ to public;
 
-grant select on all tables in schema @extschema@ to public;
 revoke select on @extschema@.tb_audit_event from public;
-grant select on @extschema@.tb_audit_event to postgres;
 
 grant select (audit_transaction_type, txid) 
    on @extschema@.tb_audit_event_current to public;
@@ -1239,5 +1252,4 @@ grant update (audit_transaction_type)
 
 grant insert on @extschema@.tb_audit_event, 
                 @extschema@.tb_audit_event_current,
-                @extschema@.tb_audit_transaction_type
-        to public;
+                @extschema@.tb_audit_transaction_type to public;
