@@ -187,7 +187,7 @@ end
  $_$;
 
 
--- fn_get_table_pk_col
+-- fn_get_table_pk_cols
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_table_pk_cols
 (
     in_table_name   varchar,
@@ -456,9 +456,9 @@ BEGIN
         END IF;
 
         IF my_do_log THEN
-            EXECUTE format( 'INSERT INTO @extschema@tb_audit_event '
-                         || '( audit_field, pk_vals, row_op, old_value, new_value )'
-                         || 'VALUES(  $1, $2, $3::char(1), $4.%1$I::varchar, $5.%1$I::varchar )',
+            EXECUTE format( 'INSERT INTO @extschema@.tb_audit_event '
+                         || '( audit_field, pk_vals, row_op, old_value, new_value ) '
+                         || 'VALUES(  $1, $2, $3::char(1), $4.%1$I::varchar, $5.%1$I::varchar ) ',
                             my_column_name
                           )
               USING my_audit_field, my_pk_vals, TG_OP, my_old_row, my_new_row;
