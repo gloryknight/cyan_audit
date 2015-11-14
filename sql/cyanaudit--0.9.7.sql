@@ -623,9 +623,15 @@ CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_transaction_type
 ALTER SEQUENCE sq_pk_audit_transaction_type
     owned by cyanaudit.tb_audit_transaction_type.audit_transaction_type;
 
-CREATE SEQUENCE cyanaudit.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
+SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_transaction_type','');
+SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_transaction_type','');
+
+
+
 
 -- tb_audit_event
+CREATE SEQUENCE cyanaudit.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
+
 CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_event
 (
     audit_field             integer not null references cyanaudit.tb_audit_field,
@@ -654,6 +660,10 @@ create index tb_audit_event_current_recorded_idx
     on cyanaudit.tb_audit_event_current(recorded);
 create index tb_audit_event_current_audit_field_idx
     on cyanaudit.tb_audit_event_current(audit_field);
+
+-- We don't want audit data to be lost if extension is dropped.
+alter extension cyanaudit 
+    drop table cyanaudit.tb_audit_event_current;
 
 
 
