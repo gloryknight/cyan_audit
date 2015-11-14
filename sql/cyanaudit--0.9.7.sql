@@ -563,23 +563,6 @@ end;
     language 'plpgsql';
 
 
---------- Audit event archiving -----------
-
-create or replace function cyanaudit.fn_redirect_audit_events() 
-returns trigger as
- $_$
-begin
-    insert into cyanaudit.tb_audit_event_current select NEW.*;
-    return null;
-end
- $_$
-    language 'plpgsql';
-
-create trigger tr_redirect_audit_events 
-    before insert on cyanaudit.tb_audit_event
-    for each row execute procedure cyanaudit.fn_redirect_audit_events();
-
-
 
 ------------------
 ----- TABLES -----
@@ -645,7 +628,7 @@ CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_event
     new_value               text
 );
 
-ALTER TABLE tb_audit_event
+ALTER TABLE cyanaudit.tb_audit_event
     ADD CONSTRAINT tb_audit_event_consistency_chk
         CHECK( case row_op when 'I' then old_value is null when 'D' then new_value is null 
                            when 'U' then old_value is distinct from new_value end );
@@ -912,6 +895,24 @@ end
 CREATE TRIGGER tr_after_audit_field_change
     AFTER INSERT OR UPDATE on cyanaudit.tb_audit_field
     FOR EACH ROW EXECUTE PROCEDURE cyanaudit.fn_after_audit_field_change();
+
+
+
+--------- Audit event archiving -----------
+
+create or replace function cyanaudit.fn_redirect_audit_events() 
+returns trigger as
+ $_$
+begin
+    insert into cyanaudit.tb_audit_event_current select NEW.*;
+    return null;
+end
+ $_$
+    language 'plpgsql';
+
+create trigger tr_redirect_audit_events 
+    before insert on cyanaudit.tb_audit_event
+    for each row execute procedure cyanaudit.fn_redirect_audit_events();
 
 
 
