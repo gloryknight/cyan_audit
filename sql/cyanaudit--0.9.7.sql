@@ -644,10 +644,6 @@ create index tb_audit_event_current_recorded_idx
 create index tb_audit_event_current_audit_field_idx
     on cyanaudit.tb_audit_event_current(audit_field);
 
--- We don't want audit data to be lost if extension is dropped.
-alter extension cyanaudit 
-    drop table cyanaudit.tb_audit_event_current;
-
 
 
 --------------------
@@ -958,18 +954,19 @@ end;
 
 --- PERMISSIONS
 
-grant usage on schema cyanaudit to public;
+grant  usage
+       on schema cyanaudit                      to public;
 
-grant usage on all sequences in schema cyanaudit to public;
+grant  usage
+       on all sequences in schema cyanaudit     to public;
 
-revoke select on cyanaudit.tb_audit_event from public;
+grant  insert, select 
+       on cyanaudit.tb_audit_transaction_type   to public;
 
-grant select (audit_transaction_type, txid) 
-   on cyanaudit.tb_audit_event_current to public;
-grant update (audit_transaction_type) 
-   on cyanaudit.tb_audit_event_current to public;
+grant  insert 
+       on cyanaudit.tb_audit_event              to public;
 
-grant insert on cyanaudit.tb_audit_event, 
-                cyanaudit.tb_audit_event_current,
-                cyanaudit.tb_audit_transaction_type to public;
-
+grant  insert, 
+       select (audit_transaction_type, txid), 
+       update (audit_transaction_type) 
+       on cyanaudit.tb_audit_event_current      to public;

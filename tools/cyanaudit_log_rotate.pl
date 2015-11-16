@@ -122,6 +122,9 @@ $handle->do("begin");
 
 print "Setting permissions and extension ownership of new table... ";
 
+$q = "alter extension cyanaudit add table $schema.tb_audit_event_current";
+$handle->do($q) or die "Could not set extension ownership of new audit table\n";
+
 $q = "grant insert on $schema.tb_audit_event_current to public";
 $handle->do($q) or die "Could not grant audit event table permissions\n";
 
