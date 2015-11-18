@@ -29,7 +29,7 @@ end;
  $$;
 
 -- fn_set_audit_uid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_set_audit_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_set_audit_uid
 (
     in_uid   integer
 )
@@ -41,7 +41,7 @@ as $_$
 
 
 -- fn_get_audit_uid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_audit_uid() 
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid() 
 returns integer 
 language plpgsql stable
 as $_$
@@ -52,19 +52,19 @@ begin
 
     if my_uid >= 0 then return my_uid; end if;
 
-    select cyanaudit.fn_get_audit_uid_by_username(current_user::varchar)
+    select @extschema@.fn_get_audit_uid_by_username(current_user::varchar)
       into my_uid;
 
-    return cyanaudit.fn_set_audit_uid( coalesce( my_uid, 0 ) );
+    return @extschema@.fn_set_audit_uid( coalesce( my_uid, 0 ) );
 exception
     when undefined_object
-    then return cyanaudit.fn_set_audit_uid( 0 );
+    then return @extschema@.fn_set_audit_uid( 0 );
 end
  $_$;
 
 
 -- fn_set_last_audit_txid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_set_last_audit_txid
+CREATE OR REPLACE FUNCTION @extschema@.fn_set_last_audit_txid
 (
     bigint default txid_current()
 )
@@ -76,7 +76,7 @@ as $_$
 
 
 -- fn_get_last_audit_txid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_last_audit_txid()
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_last_audit_txid()
 returns bigint
 language sql stable
 as $_$
@@ -85,7 +85,7 @@ as $_$
 
 
 -- fn_get_email_by_audit_uid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_email_by_audit_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_email_by_audit_uid
 (
     in_uid  integer
 )
@@ -137,7 +137,7 @@ end
 
 
 -- fn_get_audit_uid_by_username
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_audit_uid_by_username
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid_by_username
 (
     in_username varchar
 )
@@ -188,7 +188,7 @@ end
 
 
 -- fn_get_table_pk_cols
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_table_pk_cols
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_table_pk_cols
 (
     in_table_name   varchar,
     in_table_schema varchar default 'public'
@@ -225,7 +225,7 @@ cross join tt_conkey c
 
 
 -- fn_get_or_create_audit_transaction_type
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_or_create_audit_transaction_type
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_transaction_type
 (
     in_label    varchar
 )
@@ -237,11 +237,11 @@ declare
 begin
     select audit_transaction_type
       into my_audit_transaction_type
-      from cyanaudit.tb_audit_transaction_type
+      from @extschema@.tb_audit_transaction_type
      where label = in_label;
 
     if not found then
-        insert into cyanaudit.tb_audit_transaction_type
+        insert into @extschema@.tb_audit_transaction_type
         (
             label
         )
@@ -259,7 +259,7 @@ end
 
         
 -- fn_label_audit_transaction
-CREATE OR REPLACE FUNCTION cyanaudit.fn_label_audit_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_audit_transaction
 (
     in_label    varchar,
     in_txid     bigint default txid_current()
@@ -270,10 +270,10 @@ as $_$
 declare
     my_audit_transaction_type   integer;
 begin
-    select cyanaudit.fn_get_or_create_audit_transaction_type(in_label)
+    select @extschema@.fn_get_or_create_audit_transaction_type(in_label)
       into my_audit_transaction_type;
 
-    update cyanaudit.tb_audit_event_current
+    update @extschema@.tb_audit_event_current
        set audit_transaction_type = my_audit_transaction_type
      where txid = in_txid
        and audit_transaction_type is null;
@@ -285,22 +285,22 @@ end
 
 
 -- fn_label_last_audit_transaction
-CREATE OR REPLACE FUNCTION cyanaudit.fn_label_last_audit_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_audit_transaction
 (
     in_label    varchar
 )
 returns bigint
 language sql strict
 as $_$
-    select cyanaudit.fn_label_audit_transaction
+    select @extschema@.fn_label_audit_transaction
            (
                 in_label, 
-                cyanaudit.fn_get_last_audit_txid()
+                @extschema@.fn_get_last_audit_txid()
            );
  $_$;
 
 -- fn_undo_transaction
-CREATE OR REPLACE FUNCTION cyanaudit.fn_undo_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_undo_transaction
 (
     in_txid   bigint
 )
@@ -319,7 +319,7 @@ begin
         return next my_statement;
     end loop;
 
-    perform cyanaudit.fn_label_audit_transaction('Undo transaction');
+    perform @extschema@.fn_label_audit_transaction('Undo transaction');
 
     return;
 end
@@ -327,17 +327,17 @@ end
 
 
 -- fn_undo_last_transaction
-CREATE OR REPLACE FUNCTION cyanaudit.fn_undo_last_transaction()
+CREATE OR REPLACE FUNCTION @extschema@.fn_undo_last_transaction()
 returns setof varchar as
  $_$
-    select cyanaudit.fn_undo_transaction(cyanaudit.fn_get_last_audit_txid());
+    select @extschema@.fn_undo_transaction(@extschema@.fn_get_last_audit_txid());
  $_$
     language 'sql';
 
 
 
 -- fn_get_or_create_audit_field
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_or_create_audit_field
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_field
 (
     in_table_schema     varchar,
     in_table_name       varchar,
@@ -353,13 +353,13 @@ begin
            loggable
       into my_audit_field,
            my_loggable
-      from cyanaudit.tb_audit_field
+      from @extschema@.tb_audit_field
      where table_schema = in_table_schema
        and table_name = in_table_name
        and column_name = in_column_name;
 
     if not found then
-        insert into cyanaudit.tb_audit_field
+        insert into @extschema@.tb_audit_field
         (
             table_schema,
             table_name,
@@ -374,7 +374,7 @@ begin
         returning audit_field
         into my_audit_field;
     elsif my_loggable is false then
-        update cyanaudit.tb_audit_field
+        update @extschema@.tb_audit_field
            set loggable = loggable -- trigger will set correct value
          where audit_field = my_audit_field;
     end if;
@@ -387,7 +387,7 @@ end
 
 
 
-CREATE OR REPLACE FUNCTION cyanaudit.fn_log_audit_event()
+CREATE OR REPLACE FUNCTION @extschema@.fn_log_audit_event()
  RETURNS trigger
  LANGUAGE plpgsql
 AS $_$
@@ -423,7 +423,7 @@ BEGIN
         return my_new_row;
     end if;
 
-    perform cyanaudit.fn_set_last_audit_txid();
+    perform @extschema@.fn_set_last_audit_txid();
 
     -- Given:  my_pk_cols::varchar[]           = ARRAY[ 'column foo',bar ]
     -- Result: my_pk_vals_constructor::varchar = 'select ARRAY[ $1."column foo", $1.bar ]::varchar[]'
@@ -464,7 +464,7 @@ BEGIN
 
         END IF;
 
-        EXECUTE format( 'INSERT INTO cyanaudit.tb_audit_event '
+        EXECUTE format( 'INSERT INTO @extschema@.tb_audit_event '
                      || '( audit_field, pk_vals, row_op, old_value, new_value ) '
                      || 'VALUES(  $1, $2, $3::char(1), $4, $5 ) ',
                         my_column_name
@@ -494,7 +494,7 @@ $_$;
 -- fn_update_audit_fields
 -- Create or update audit_fields for all columns in the passed-in schema.
 -- If passed-in schema is null, create or update for all already-known schemas.
-CREATE OR REPLACE FUNCTION cyanaudit.fn_update_audit_fields
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields
 (
     in_schema            varchar default null
 ) 
@@ -516,14 +516,14 @@ begin
                 else array_agg( distinct table_schema )
            end
       into my_schemas
-      from cyanaudit.tb_audit_field;
+      from @extschema@.tb_audit_field;
 
     with tt_audit_fields as
     (
         select coalesce
                (
                     af.audit_field,
-                    cyanaudit.fn_get_or_create_audit_field
+                    @extschema@.fn_get_or_create_audit_field
                     ( 
                         n.nspname::varchar,
                         c.relname::varchar,
@@ -544,13 +544,13 @@ begin
                  on conrelid = c.oid
                 and cn.contype = 'p'
                ) 
-     full join cyanaudit.tb_audit_field af
+     full join @extschema@.tb_audit_field af
             on af.table_schema = n.nspname::varchar
            and af.table_name   = c.relname::varchar
            and af.column_name  = a.attname::varchar
            and af.loggable is true
     )
-    update cyanaudit.tb_audit_field af
+    update @extschema@.tb_audit_field af
        set loggable = false
       from tt_audit_fields ttaf
      where af.audit_field = ttaf.audit_field
@@ -569,11 +569,11 @@ end;
 ------------------
 
 -- tb_audit_field
-create sequence cyanaudit.sq_pk_audit_field;
+create sequence @extschema@.sq_pk_audit_field;
 
-CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_field
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
 (
-    audit_field     integer primary key default nextval('cyanaudit.sq_pk_audit_field'),
+    audit_field     integer primary key default nextval('@extschema@.sq_pk_audit_field'),
     table_schema    varchar not null default 'public',
     table_name      varchar not null,
     column_name     varchar not null,
@@ -582,67 +582,67 @@ CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_field
     CONSTRAINT tb_audit_field_table_column_key 
         UNIQUE( table_schema, table_name, column_name ),
     CONSTRAINT tb_audit_field_tb_audit_event_not_allowed 
-        CHECK( table_schema != 'cyanaudit' )
+        CHECK( table_schema != '@extschema@' )
 );
 
-alter sequence cyanaudit.sq_pk_audit_field
-    owned by cyanaudit.tb_audit_field.audit_field;
+alter sequence @extschema@.sq_pk_audit_field
+    owned by @extschema@.tb_audit_field.audit_field;
 
-SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_field','');
-SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_field','');
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_field','');
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_field','');
 
 
 
 -- tb_audit_transaction_type
-CREATE SEQUENCE cyanaudit.sq_pk_audit_transaction_type;
+CREATE SEQUENCE @extschema@.sq_pk_audit_transaction_type;
 
-CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_transaction_type
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_transaction_type
 (
     audit_transaction_type  integer primary key
-                            default nextval('cyanaudit.sq_pk_audit_transaction_type'),
+                            default nextval('@extschema@.sq_pk_audit_transaction_type'),
     label                   varchar unique
 );
 
 ALTER SEQUENCE sq_pk_audit_transaction_type
-    owned by cyanaudit.tb_audit_transaction_type.audit_transaction_type;
+    owned by @extschema@.tb_audit_transaction_type.audit_transaction_type;
 
-SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_transaction_type','');
-SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_transaction_type','');
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_transaction_type','');
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_transaction_type','');
 
 
 
 
 -- tb_audit_event
-CREATE SEQUENCE cyanaudit.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
+CREATE SEQUENCE @extschema@.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
 
-CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_event
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
 (
-    audit_field             integer not null references cyanaudit.tb_audit_field,
+    audit_field             integer not null references @extschema@.tb_audit_field,
     pk_vals                 varchar[] not null,
     recorded                timestamp not null default clock_timestamp(),
-    uid                     integer not null default cyanaudit.fn_get_audit_uid(),
+    uid                     integer not null default @extschema@.fn_get_audit_uid(),
     row_op                  char(1) not null CHECK (row_op in ('I','U','D')),
     txid                    bigint not null default txid_current(),
-    audit_transaction_type  integer references cyanaudit.tb_audit_transaction_type,
+    audit_transaction_type  integer references @extschema@.tb_audit_transaction_type,
     old_value               text,
     new_value               text
 );
 
-ALTER TABLE cyanaudit.tb_audit_event
+ALTER TABLE @extschema@.tb_audit_event
     ADD CONSTRAINT tb_audit_event_consistency_chk
         CHECK( case row_op when 'I' then old_value is null when 'D' then new_value is null 
                            when 'U' then old_value is distinct from new_value end );
 
 -- tb_audit_event_current
-CREATE TABLE IF NOT EXISTS cyanaudit.tb_audit_event_current()
-    inherits ( cyanaudit.tb_audit_event );
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event_current()
+    inherits ( @extschema@.tb_audit_event );
 
 create index tb_audit_event_current_txid_idx
-    on cyanaudit.tb_audit_event_current(txid);
+    on @extschema@.tb_audit_event_current(txid);
 create index tb_audit_event_current_recorded_idx
-    on cyanaudit.tb_audit_event_current(recorded);
+    on @extschema@.tb_audit_event_current(recorded);
 create index tb_audit_event_current_audit_field_idx
-    on cyanaudit.tb_audit_event_current(audit_field);
+    on @extschema@.tb_audit_event_current(audit_field);
 
 
 
@@ -651,10 +651,10 @@ create index tb_audit_event_current_audit_field_idx
 --------------------
 
 -- log view
-CREATE OR REPLACE VIEW cyanaudit.vw_audit_log as
+CREATE OR REPLACE VIEW @extschema@.vw_audit_log as
    select ae.recorded, 
           ae.uid, 
-          cyanaudit.fn_get_email_by_audit_uid(ae.uid) as user_email,
+          @extschema@.fn_get_email_by_audit_uid(ae.uid) as user_email,
           ae.txid, 
           att.label as description,
           case when af.table_schema = any(current_schemas(true))
@@ -666,16 +666,16 @@ CREATE OR REPLACE VIEW cyanaudit.vw_audit_log as
           ae.row_op as op,
           ae.old_value,
           ae.new_value
-     from cyanaudit.tb_audit_event ae
-     join cyanaudit.tb_audit_field af using(audit_field)
-left join cyanaudit.tb_audit_transaction_type att using(audit_transaction_type)
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
+left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
  order by ae.recorded desc, af.table_name, af.column_name;
 
 -- vw_audit_transaction_statement
-CREATE OR REPLACE VIEW cyanaudit.vw_audit_transaction_statement as
+CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
    select ae.txid, 
           ae.recorded,
-          cyanaudit.fn_get_email_by_audit_uid(ae.uid) as user_email,
+          @extschema@.fn_get_email_by_audit_uid(ae.uid) as user_email,
           att.label as description, 
           (case ae.row_op
           when 'I' then
@@ -699,18 +699,18 @@ CREATE OR REPLACE VIEW cyanaudit.vw_audit_transaction_statement as
                || quote_literal(fn_get_table_pk_cols(af.table_name, af.table_schema)) || ' = ' 
                || quote_literal(ae.pk_vals) || ';'
           end)::varchar as query
-     from cyanaudit.tb_audit_event ae
-     join cyanaudit.tb_audit_field af using(audit_field)
-left join cyanaudit.tb_audit_transaction_type att using(audit_transaction_type)
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
+left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
  group by af.table_schema, af.table_name, ae.row_op, 
           ae.pk_vals, ae.txid, ae.recorded, att.label, 
-          cyanaudit.fn_get_email_by_audit_uid(ae.uid),
+          @extschema@.fn_get_email_by_audit_uid(ae.uid),
           fn_get_table_pk_cols(af.table_name, af.table_schema)
  order by ae.recorded;
 
 
 -- vw_audit_transaction_statement_inverse
-CREATE OR REPLACE VIEW cyanaudit.vw_audit_transaction_statement_inverse AS
+CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement_inverse AS
    select ae.txid,
           (case ae.row_op
            when 'D' then 
@@ -739,8 +739,8 @@ CREATE OR REPLACE VIEW cyanaudit.vw_audit_transaction_statement_inverse AS
                || quote_literal(fn_get_table_pk_cols(af.table_name, af.table_schema)) || ' = ' 
                || quote_literal(ae.pk_vals) || ';'
           end)::varchar as query
-     from cyanaudit.tb_audit_event ae
-     join cyanaudit.tb_audit_field af using(audit_field)
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
  group by af.table_schema, af.table_name, ae.row_op, 
           ae.pk_vals, ae.recorded, ae.txid,
           fn_get_table_pk_cols(af.table_name, af.table_schema)
@@ -753,14 +753,14 @@ CREATE OR REPLACE VIEW cyanaudit.vw_audit_transaction_statement_inverse AS
 -----------------------
 
 -- fn_before_audit_field_change
-CREATE OR REPLACE FUNCTION cyanaudit.fn_before_audit_field_change()
+CREATE OR REPLACE FUNCTION @extschema@.fn_before_audit_field_change()
 returns trigger as
  $_$
 declare
     my_pk_colname       varchar;
 begin
     IF TG_OP = 'INSERT' THEN
-        if NEW.table_schema = 'cyanaudit' then return NULL; end if;
+        if NEW.table_schema = '@extschema@' then return NULL; end if;
     ELSIF TG_OP = 'DELETE' then
         raise exception 'cyanaudit: Deletion from this table is not allowed.';
     ELSIf TG_OP = 'UPDATE' then
@@ -804,7 +804,7 @@ begin
                 -- Else, true:
         select enabled
           into NEW.enabled
-          from cyanaudit.tb_audit_field
+          from @extschema@.tb_audit_field
       order by (table_name = NEW.table_name) desc, -- Sort enabled fields over table to top of that
                (table_schema = NEW.table_schema) desc, -- Sort enabled fields within schema to top of that
                enabled desc; -- Sort any remaining enabled fields to the top
@@ -822,12 +822,12 @@ end
 
 
 CREATE TRIGGER tr_before_audit_field_change
-    BEFORE INSERT OR UPDATE ON cyanaudit.tb_audit_field
-    FOR EACH ROW EXECUTE PROCEDURE cyanaudit.fn_before_audit_field_change();
+    BEFORE INSERT OR UPDATE ON @extschema@.tb_audit_field
+    FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_before_audit_field_change();
 
 
 -- fn_after_audit_field_change
-CREATE OR REPLACE FUNCTION cyanaudit.fn_after_audit_field_change()
+CREATE OR REPLACE FUNCTION @extschema@.fn_after_audit_field_change()
 returns trigger 
 language plpgsql
 as $_$
@@ -861,19 +861,19 @@ begin
            array_agg(column_name)
       into my_audit_fields,
            my_column_names
-      from cyanaudit.tb_audit_field
+      from @extschema@.tb_audit_field
      where enabled
        and loggable
        and table_schema = NEW.table_schema
        and table_name = NEW.table_name;
 
     IF array_length(my_audit_fields, 1) > 0 THEN
-        my_pk_colnames := cyanaudit.fn_get_table_pk_cols( NEW.table_name, NEW.table_schema );
+        my_pk_colnames := @extschema@.fn_get_table_pk_cols( NEW.table_name, NEW.table_schema );
             
         -- Create the table trigger (if it doesn't exist) to call the function
         execute format( 'CREATE TRIGGER tr_log_audit_event '
                      || 'AFTER INSERT OR UPDATE OR DELETE ON %I.%I FOR EACH ROW '
-                     || 'EXECUTE PROCEDURE cyanaudit.fn_log_audit_event(%L,%L,%L)',
+                     || 'EXECUTE PROCEDURE @extschema@.fn_log_audit_event(%L,%L,%L)',
                         NEW.table_schema,
                         NEW.table_name,
                         my_pk_colnames,
@@ -889,38 +889,38 @@ end
 -- Function to install the event trigger explicitly after pg_restore completes,
 -- because we don't want it firing during pg_restore.
 CREATE TRIGGER tr_after_audit_field_change
-    AFTER INSERT OR UPDATE on cyanaudit.tb_audit_field
-    FOR EACH ROW EXECUTE PROCEDURE cyanaudit.fn_after_audit_field_change();
+    AFTER INSERT OR UPDATE on @extschema@.tb_audit_field
+    FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_after_audit_field_change();
 
 
 
 --------- Audit event archiving -----------
 
-create or replace function cyanaudit.fn_redirect_audit_events() 
+create or replace function @extschema@.fn_redirect_audit_events() 
 returns trigger as
  $_$
 begin
-    insert into cyanaudit.tb_audit_event_current select NEW.*;
+    insert into @extschema@.tb_audit_event_current select NEW.*;
     return null;
 end
  $_$
     language 'plpgsql';
 
 create trigger tr_redirect_audit_events 
-    before insert on cyanaudit.tb_audit_event
-    for each row execute procedure cyanaudit.fn_redirect_audit_events();
+    before insert on @extschema@.tb_audit_event
+    for each row execute procedure @extschema@.fn_redirect_audit_events();
 
 
 
 
 -- EVENT TRIGGER
 -- fn_update_audit_fields_event_trigger()
-CREATE OR REPLACE FUNCTION cyanaudit.fn_update_audit_fields_event_trigger()
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger()
 returns event_trigger
 language plpgsql as
    $function$
 begin
-    perform cyanaudit.fn_update_audit_fields();
+    perform @extschema@.fn_update_audit_fields();
 exception
      when insufficient_privilege
      then return;
@@ -929,7 +929,7 @@ end
 
 
 
-CREATE OR REPLACE FUNCTION cyanaudit.fn_create_event_trigger()
+CREATE OR REPLACE FUNCTION @extschema@.fn_create_event_trigger()
 RETURNS void
 LANGUAGE plpgsql
 AS $_$
@@ -941,7 +941,7 @@ begin
     IF NOT FOUND THEN
         CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end
             WHEN TAG IN ('ALTER TABLE', 'CREATE TABLE', 'DROP TABLE')
-            EXECUTE PROCEDURE cyanaudit.fn_update_audit_fields_event_trigger();
+            EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger();
 
         ALTER EXTENSION cyanaudit ADD EVENT TRIGGER tr_update_audit_fields;
     END IF;
@@ -955,18 +955,18 @@ end;
 --- PERMISSIONS
 
 grant  usage
-       on schema cyanaudit                      to public;
+       on schema @extschema@                      to public;
 
 grant  usage
-       on all sequences in schema cyanaudit     to public;
+       on all sequences in schema @extschema@     to public;
 
 grant  insert, select 
-       on cyanaudit.tb_audit_transaction_type   to public;
+       on @extschema@.tb_audit_transaction_type   to public;
 
 grant  insert 
-       on cyanaudit.tb_audit_event              to public;
+       on @extschema@.tb_audit_event              to public;
 
 grant  insert, 
        select (audit_transaction_type, txid), 
        update (audit_transaction_type) 
-       on cyanaudit.tb_audit_event_current      to public;
+       on @extschema@.tb_audit_event_current      to public;

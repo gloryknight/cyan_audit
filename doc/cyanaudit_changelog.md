@@ -1,3 +1,10 @@
+0.9.6 -> 0.9.7
+--------------
+- Added support for logging tables with multi-column PKs
+- Changed table trigger to call generic logging function instead of calling a
+  different (dynamically-created) trigger function for each table.
+- Lots and lots of code cleanup
+
 0.9.5 -> 0.9.6
 --------------
 - Added support for logging tables in schemas other than 'public'. Yay!

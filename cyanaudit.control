@@ -3,4 +3,3 @@ default_version = '0.9.7'
 relocatable = false
 superuser = true
 requires = 'plpgsql'
-schema = 'cyanaudit'
