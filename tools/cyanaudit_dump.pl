@@ -154,100 +154,103 @@ foreach my $table_row (@$table_rows)
 
     if( @glob_results and not $opts{'c'} )
     {
-        next;
+        print "Found existing backup for table $table.\n";
     }
-
-    my $exporting_msg = "Exporting $schema.$table ($size)";
-
-    print "$exporting_msg: ";
-    
-    print " Preparing... " if( -t STDIN );
-
-    my $min_q = "select audit_event "
-              . "  from $schema.$table "
-              . " where recorded = "
-              . "       ( "
-              . "           select min(recorded) "
-              . "             from $schema.$table "
-              . "       ) "
-              . " limit 1 ";
-
-    my ($min_audit_event) = $handle->selectrow_array($min_q);
-
-    my $max_q = "select audit_event "
-              . "  from $schema.$table "
-              . " where recorded = "
-              . "       ( "
-              . "           select max(recorded) "
-              . "             from $schema.$table "
-              . "       ) "
-              . " limit 1 ";
-
-    my ($max_audit_event) = $handle->selectrow_array($max_q);
-
-    my $data_q = "   select ae.audit_event, "
-               . "          ae.txid, "
-               . "          ae.recorded, "
-               . "          ae.uid, "
-               . "          u.$user_table_email_col, "
-               . "          af.table_name, "
-               . "          af.column_name, "
-               . "          adt.name as data_type, "
-               . "          ae.row_pk_val, "
-               . "          ae.row_op, "
-               . "          ae.pid, "
-               . "          att.label as description, "
-               . "          ae.old_value, "
-               . "          ae.new_value "
-               . "     from $schema.$table ae "
-               . "     join $schema.tb_audit_field af "
-               . "       on ae.audit_field = af.audit_field "
-               . "     join $schema.tb_audit_data_type adt "
-               . "       on adt.audit_data_type = af.audit_data_type "
-               . "left join $schema.tb_audit_transaction_type att "
-               . "       on ae.audit_transaction_type = att.audit_transaction_type "
-               . "     join $user_table u "
-               . "       on ae.uid = u.$user_table_uid_col "
-               . " order by recorded ";
-
-    $handle->do("copy ($data_q) to stdout with csv header");
-
-    my $open_str = "> $outdir/$table.csv";
-
-    if( $opts{'z'} )
+    else
     {
-        $open_str = "| gzip -9 -c $open_str.gz";
-    }
 
-    open( my $fh, $open_str ) or die "Could not open output for writing: $!\n";
+        my $exporting_msg = "Exporting $schema.$table ($size)";
 
-    my $row;
-    my $row_count = 0;
+        print "$exporting_msg: ";
+        
+        print " Preparing... " if( -t STDIN );
 
-    while( $handle->pg_getcopydata(\$row) >= 0 )
-    {
-        my $row_encoded = encode( 'UTF-8', $row, Encode::FB_CROAK );
+        my $min_q = "select audit_event "
+                  . "  from $schema.$table "
+                  . " where recorded = "
+                  . "       ( "
+                  . "           select min(recorded) "
+                  . "             from $schema.$table "
+                  . "       ) "
+                  . " limit 1 ";
 
-        print $fh $row_encoded or die "Error writing to file: $!\n";
+        my ($min_audit_event) = $handle->selectrow_array($min_q);
 
-        if ( -t STDIN and $row_count > 1 ) 
+        my $max_q = "select audit_event "
+                  . "  from $schema.$table "
+                  . " where recorded = "
+                  . "       ( "
+                  . "           select max(recorded) "
+                  . "             from $schema.$table "
+                  . "       ) "
+                  . " limit 1 ";
+
+        my ($max_audit_event) = $handle->selectrow_array($max_q);
+
+        my $data_q = "   select ae.audit_event, "
+                   . "          ae.txid, "
+                   . "          ae.recorded, "
+                   . "          ae.uid, "
+                   . "          u.$user_table_email_col, "
+                   . "          af.table_name, "
+                   . "          af.column_name, "
+                   . "          adt.name as data_type, "
+                   . "          ae.row_pk_val, "
+                   . "          ae.row_op, "
+                   . "          ae.pid, "
+                   . "          att.label as description, "
+                   . "          ae.old_value, "
+                   . "          ae.new_value "
+                   . "     from $schema.$table ae "
+                   . "     join $schema.tb_audit_field af "
+                   . "       on ae.audit_field = af.audit_field "
+                   . "     join $schema.tb_audit_data_type adt "
+                   . "       on adt.audit_data_type = af.audit_data_type "
+                   . "left join $schema.tb_audit_transaction_type att "
+                   . "       on ae.audit_transaction_type = att.audit_transaction_type "
+                   . "     join $user_table u "
+                   . "       on ae.uid = u.$user_table_uid_col "
+                   . " order by recorded ";
+
+        $handle->do("copy ($data_q) to stdout with csv header");
+
+        my $open_str = "> $outdir/$table.csv";
+
+        if( $opts{'z'} )
         {
-            (my $current_audit_event = $row_encoded) =~ s/,.*$//s;
-
-            my $current_percent = ($current_audit_event - $min_audit_event) /
-                                  ($max_audit_event - $min_audit_event) * 100;
-
-            if( $row_count % 1000 == 1 or $current_percent == 100 ) 
-            {
-                printf "\r$exporting_msg: %0.1f%% complete... ",
-                        $current_percent;
-            }
+            $open_str = "| gzip -9 -c $open_str.gz";
         }
 
-        $row_count++;
-    }
+        open( my $fh, $open_str ) or die "Could not open output for writing: $!\n";
 
-    print "Done!\n";
+        my $row;
+        my $row_count = 0;
+
+        while( $handle->pg_getcopydata(\$row) >= 0 )
+        {
+            my $row_encoded = encode( 'UTF-8', $row, Encode::FB_CROAK );
+
+            print $fh $row_encoded or die "Error writing to file: $!\n";
+
+            if ( -t STDIN and $row_count > 1 ) 
+            {
+                (my $current_audit_event = $row_encoded) =~ s/,.*$//s;
+
+                my $current_percent = ($current_audit_event - $min_audit_event) /
+                                      ($max_audit_event - $min_audit_event) * 100;
+
+                if( $row_count % 1000 == 1 or $current_percent == 100 ) 
+                {
+                    printf "\r$exporting_msg: %0.1f%% complete... ",
+                            $current_percent;
+                }
+            }
+
+            $row_count++;
+        }
+
+        print "Done!\n";
+    }
 
     if( $opts{'r'} and $remove )
     {
