@@ -28,8 +28,7 @@ endif
 #############################
 ### Packaging for release ###
 #############################
-PKGFILES     = cyanaudit.control LICENSE README.md Makefile META.json \
-               $(PKG_SQL) $(DOCS) $(SCRIPTS)
+PKGFILES     = cyanaudit.control LICENSE README.md Makefile META.json $(PKG_SQL) $(DOCS) $(SCRIPTS)
 
 PKGNAME      = $(EXTENSION)-$(EXTVERSION)
 PKG_TGZ      = dist/$(PKGNAME).tar.gz
