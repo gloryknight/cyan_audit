@@ -4,6 +4,10 @@
 - Changed table trigger to call generic logging function instead of calling a
   different (dynamically-created) trigger function for each table.
 - Lots and lots of code cleanup
+- Fixed a bug with cyanaudit_dump.pl where it was not dropping old archive
+  tables as intended, even though -r was specified, and the table was older than
+  the -m value. This happened in the typical case where the table's backup file
+  was already present before the script was run and -c was not specified.
 
 0.9.5 -> 0.9.6
 --------------

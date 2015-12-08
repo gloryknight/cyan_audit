@@ -22,7 +22,7 @@ system that requires minimal modification to your application and is installed
 easily and cleanly as a PostgreSQL extension.
 
 Cyan Audit can selectively log DML on a column-by-column basis, and you can
-select which tables/columns to log using a simple UPDATE command.
+select which tables/columns to log by updating a simple config table.
 
 You can also turn off logging entirely for just your session if you'd like to
 perform bulk administrative actions without clogging up your log table.
@@ -32,8 +32,8 @@ based on recorded timestamp, table/column, userid who performed the action, PK
 value of the affected row, and more.
 
 One of the handiest features, however, is the ability to "undo" a transaction. A
-simple function call will issue SQL statements to reverse every data
-modification logged for the given transaction ID.
+simple function call will issue the inverse SQL statements of those originally
+executed in the given transaction ID.
 
 Does that sound interesting? Good, let's get started.
 
@@ -42,8 +42,7 @@ Requirements & Limitations
 ==========================
 
 * PostgreSQL 9.3.3 or above is required.
-* Requires languages `plpgsql` and `plperl`.
-* Currently only tables having a single-column PK of type integer can be logged.
+* Requires language `plpgsql`
 
 
 Installation
@@ -61,22 +60,18 @@ Installation
    modifying your login script (e.g. .bashrc) to add your `/usr/pgsql-9.3/bin` (or
    equivalent) directory to your `$PATH`.
 
-3. Configure custom_variable_classes in `postgresql.conf` (Only for PostgreSQL 9.1):
+3. Log into your database as user `postgres` and create the schema and extension:
 
-        custom_variable_classes = 'cyanaudit'
+        CREATE SCHEMA cyanaudit;
+        CREATE EXTENSION cyanaudit SCHEMA cyanaudit;
 
-4. Log into your database as user `postgres` and create the schema and extension:
+4. Configure database-specific settings (optional):
 
-        mydb=# CREATE SCHEMA cyanaudit;
-        mydb=# CREATE EXTENSION cyanaudit SCHEMA cyanaudit;
-
-5. Configure database-specific settings (optional):
-
-        alter database mydb set cyanaudit.archive_tablespace = 'big_slow_drive';
-        alter database mydb set cyanaudit.user_table = 'tb_entity';
-        alter database mydb set cyanaudit.user_table_uid_col = 'entity';
-        alter database mydb set cyanaudit.user_table_email_col = 'email_address';
-        alter database mydb set cyanaudit.user_table_username_col = 'username';
+        ALTER DATABASE mydb SET cyanaudit.archive_tablespace = 'big_slow_drive';
+        ALTER DATABASE mydb SET cyanaudit.user_table = 'tb_entity';
+        ALTER DATABASE mydb SET cyanaudit.user_table_uid_col = 'entity';
+        ALTER DATABASE mydb SET cyanaudit.user_table_email_col = 'email_address';
+        ALTER DATABASE mydb SET cyanaudit.user_table_username_col = 'username';
 
    The `archive_tablespace` setting is the name of the tablespace to which you
    would like your logs to be archived when they are rotated. This allows you to
@@ -90,28 +85,37 @@ Installation
    userid from your application to a user in your database cluster. For this to
    work, your database cluster usernames must match those of your application.
 
-6. Force all sessions to reconnect and pick up the database config settings (optional):
+5. Force all sessions to reconnect and pick up the database config settings (optional):
 
-        select pg_terminate_backend(pid) 
-          from pg_stat_activity 
-         where pid != pg_backend_pid();
+        SELECT pg_terminate_backend(pid) 
+          FROM pg_stat_activity 
+         WHERE pid != pg_backend_pid();
 
-7. Instruct Cyan Audit to catalog all tables & columns in your database, and
-   install the logging trigger onto all tables:
+6. Install Cyan Audit logging on all tables in the 'public' schema (repeat for
+   any schemas you'd like to log):
 
-        mydb=# SELECT cyanaudit.fn_update_audit_fields();
+        SELECT cyanaudit.fn_update_audit_fields('public');
 
    **WARNING**: This function will hold an exclusive lock on all of your tables
    until the function returns. On a test database with about 2500 columns, this
    took 20 seconds. Please make sure you run this at a time when it is
    acceptable for your tables to be locked for up to a minute.
 
-8. (Optional) Add the Cyan Audit schema to your search path:
+7. Install Cyan Audit event trigger
 
-        mydb=# ALTER DATABASE mydb SET search_path = public, cyanaudit;
+   This event trigger causes Cyan Audit to re-scan for new and dropped columns
+   whenever any schema changes are made. This will prevent attempts to access
+   dropped columns:
+
+        SELECT cyanaudit.fn_create_event_trigger();
+
+7. (Optional) Add the Cyan Audit schema to your search path:
+
+        ALTER DATABASE mydb SET search_path = public, cyanaudit;
 
    This will keep you from having to preceed every relation and function in this
-   extension with `cyanaudit.`.
+   extension with `cyanaudit.`. The rest of the documentation will assume that
+   Cyan Audit's schema is in the search path.
 
 At this point, logging should be turned on for all supported tables. Perform
 some DML (INSERT, UPDATE, DELETE) and then do `select * from
@@ -168,7 +172,7 @@ again.
 
 The text string you specify here is automatically added to a distinct list of
 labels that can be used over and over without copying the actual text onto each
-transaction, so it is very efficient from the perspective of disk usage.
+transaction, so it is very efficient with disk usage.
 
 
 Database Objects
@@ -196,10 +200,10 @@ Views
                     Transactions" above for more information.
   * `table_name` - Name of table of action. Indexed together with column_name.
   * `column_name` - Name of column of action. Indexed together with table_name.
-  * `pk_val` - Integer PK value of the row that was modified
-  * `op` - Type of operation ('I', 'U' or 'D' for INSERT, UPDATE or DELETE)
-  * `old_value` - Value of column before DELETE or UPDATE
-  * `new_value` - Value of column after INSERT or UPDATE
+  * `pk_vals` - The PK value(s) of the modified row cast to a varchar[].
+  * `op` - Type of operation ('I', 'U' or 'D' for INSERT, UPDATE or DELETE).
+  * `old_value` - Value of column before DELETE or UPDATE.
+  * `new_value` - Value of column after INSERT or UPDATE.
 
   It is most efficient to query the audit log based on the indexed columns.
   Therefore, restricting by `recorded` , `txid` or `table_name` + `column_name`
@@ -231,34 +235,41 @@ Tables
 
   This table controls the tables & columns that Cyan Audit logs. It is updated
   automatically whenever you call `fn_update_audit_fields()` (which happens
-  automatically in 9.3.3 and above whenever any DDL such as a CREATE TABLE is
-  executed).
+  automatically whenever any DDL such as a CREATE TABLE is executed, thanks to
+  the event trigger that you installed during the setup process).
 
   This table has the following columns:
 
   * `audit_field` - This is the PK column of the tb_audit_field table.
-  * `table_name` - table of column being logged
-  * `column_name` - column being logged
-  * `audit_data_type` - Data type of the column.
-  * `table_pk` - audit_field row for this table's PK column.
-  * `active` - boolean indicating whether this column is enabled for logging.
+  * `table_schema` - The schema of the table given in table_name.
+  * `table_name` - The table of column given in column_name.
+  * `column_name` - The column being logged
+  * `enabled` (bool) - Set this to true if you wish to log this column.
+  * `loggable` (bool) - true if this column exists and its table has a PK.
 
-  The only column that has any use to you as the administrator is the `active`
-  boolean.  You can turn on or off logging for a particular column by updating
-  this field. As an example, the following command disables logging for table
-  'foo', column 'bar':
+  You can enable or disablelogging for a particular column by updating the
+  `enabled` field. All other fields are read-only.
+
+  For example, this command would disable logging for table 'foo', column 'bar':
 
         UPDATE tb_audit_field 
-           SET active = false 
+           SET enabled = false 
          WHERE table_name = 'foo' 
            AND column_name = 'bar';
 
-  When Cyan Audit discovers a new column in your database, it will automatically
-  set `active` to `true` (i.e. it will automatically log the column) unless the
-  following conditions are met:
+  When Cyan Audit discovers a new column in your database, it will use the
+  following sensible logic to determine the default value for `enabled`, so as
+  to avoid freaking anyone out:
 
-  1. There is at least one more column of this table already in tb_audit_field
-  2. There is no column of this table in tb_audit_field that has `active = true`
+        If any column on same table is enabled, then true.
+        Else If we know of fields on this table but all are inactive, then false.
+        Else If we know of no fields in this table, then:
+            If any field in same schema is enabled, then true.
+            Else If we know of fields in this schema but all are inactive, then false.
+            Else If we know of no columns in this schema, then:
+                If any column in the database is enabled, then true.
+                Else If we know of fields in this database but all are inactive, then false.
+                Else, true
 
 
 Functions
@@ -269,11 +280,11 @@ Functions
   Please see the section "Labeling Transactions" under "Configuring Your
   Application" for details on this function.
 
-* `fn_set_audit_uid()`
+* `fn_set_audit_uid( uid )`
 
   Sets the userid for the current session.
 
-  Please see "Passing the User ID" under "Cnofiguring Your Application for more
+  Please see "Passing the User ID" under "Configuring Your Application for more
   details on this function.
 
 * `fn_get_audit_uid()`
