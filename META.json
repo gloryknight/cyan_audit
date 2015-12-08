@@ -43,7 +43,7 @@
             }
         }
     },
-    "release_status": "testing",
+    "release_status": "stable",
     "resources": {
         "homepage": "http://cyanaudit.neadwerx.com"
     }
