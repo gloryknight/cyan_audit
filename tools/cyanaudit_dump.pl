@@ -6,257 +6,132 @@ $| = 1;
 
 use DBI;
 use Getopt::Std;
-use Data::Dumper;
 use Encode qw(encode);
 
-my %opts;
+use Cyanaudit;
 
 sub usage
 {
-    my ($message) = @_;
+    my( $msg ) = @_;
 
-    if( $message )
-    {
-        chomp($message);
-
-        warn "Error: $message\n";
-    }
-
-    warn "Usage: $0 -m months_to_keep [ options ... ]\n"
+    warn "Error: $msg\n" if( $msg );
+    print "Usage: $0 [ options ] outpath\n"
         . "Options:\n"
-        . "  -d db      Connect to database by given Name\n"
-        . "  -U user    Connect to database as given User\n"
-        . "  -h host    Connect to database on given Host\n"
-        . "  -p port    Connect to database on given Port\n"
-        . "  -a         Back up All audit tables\n"
-        . "  -c         Clobber (overwrite) existing files. Default is to skip these.\n"
-        . "  -r         Remove table from database once it has been archived\n"
-        . "  -z         gzip output file\n"
-        . "  -o dir     Output directory (default current directory)\n";
+        . "  -h host    database server host or socket directory\n"
+        . "  -p port    database server port\n"
+        . "  -U user    database user name\n"
+        . "  -d db      database name\n";
 
     exit 1;
 }
 
+my %opts;
 
-getopts('m:o:U:h:p:d:zrac', \%opts) or usage();
+getopts( 'U:h:p:d:', \%opts ) or usage();
 
-my $months = $opts{'m'};
+my $outdir = $ARGV[0];
+usage( "Must specify output directory" ) unless ( $outdir );
+usage( "Output directory '$outdir' is invalid" ) unless( -d $outdir );
+usage( "Output directory '$outdir' is not writable" ) unless ( -w $outdir );
+chdir( $outdir ) or die "Could not chdir($outdir): $!\n";
 
-unless( defined $months )
-{
-    usage("Must specify a number of months of audit data to keep ( -m )");
-}
+my $params = {
+    port => $opts{'p'},
+    user => $opts{'U'},
+    dbname => $opts{'d'},
+    host => $opts{'h'}
+};
 
-unless( $months =~ /^\d+$/ and $months >= 0 and $months <= 120 )
-{
-    usage("Invalid number of months '$months' specified. Must be <= 120");
-}
+my $handle = db_connect($params) 
+    or die "Could not connect to database: $DBI::errstr\n";;
 
-my $outdir = '.';
+my $schema = get_cyanaudit_schema($handle)
+    or die "Could not determine cyanaudit schema.\n";
 
-if( $opts{'o'} )
-{
-    $outdir = $opts{'o'};
+print "Found Cyan Audit in schema '$schema'.\n";
 
-    usage("Output directory '$outdir' is invalid") unless( -d $outdir );
-    usage("Output directory '$outdir' is not writable") unless ( -w $outdir );
-}
-
-my @connect_params;
-
-if( $opts{'p'} )
-{
-    if( $opts{'p'} !~ /^\d+$/ )
-    {
-        usage("Invalid port '$opts{'p'}' specified");
-    }
-
-    push @connect_params, 'port=' . $opts{'p'};
-}
-
-if( $opts{'h'} )
-{
-    push @connect_params, 'host=' . $opts{'h'};
-}
-
-if( $opts{'d'} )
-{
-    push @connect_params, 'dbname=' . $opts{'d'};
-}
-
-my $username = '';
-
-if( $opts{'U'} )
-{
-    $username = $opts{'U'};
-}
-
-my $connect_string = join( ';', @connect_params );
-
-my $handle = DBI->connect("dbi:Pg:$connect_string", $username, '') 
-    or die "Database connect error. Please verify .pgpass and environment variables\n";
-
-my $schema_q = "select n.nspname "
-             . "  from pg_extension e "
-             . "  join pg_namespace n "
-             . "    on e.extnamespace = n.oid "
-             . " where e.extname = 'cyanaudit'";
-
-my $schema_row = $handle->selectrow_arrayref($schema_q)
-    or die "Could not determine audit log schema\n";
-
-my $schema = $schema_row->[0];
-
-print "Found cyanaudit in schema '$schema'\n";
-
-my $user_table_q = "select current_setting('cyanaudit.user_table') "
-                 . "        as user_table, "
-                 . "       current_setting('cyanaudit.user_table_email_col') "
-                 . "        as user_table_email_col, "
-                 . "       current_setting('cyanaudit.user_table_uid_col') "
-                 . "        as user_table_uid_col ";
-
-my $user_table_row = $handle->selectrow_arrayref($user_table_q);
-
-my ($user_table, $user_table_email_col, $user_table_uid_col) = @$user_table_row;
-
-unless( $user_table and $user_table_email_col and $user_table_uid_col )
-{
-    die "Could not get cyanaudit settings for user table from postgresql.conf\n";
-}
-
-my $tables_q  = "select c.relname, ";
-   $tables_q .= "       pg_size_pretty(pg_total_relation_size(c.oid)), ";
-   $tables_q .= "       c.relname < 'tb_audit_event_' ";
-   $tables_q .= "       || to_char(now() - interval '$months months', 'YYYYMMDD_HH24MI') ";
-   $tables_q .= "  from pg_class c ";
-   $tables_q .= "  join pg_namespace n ";
-   $tables_q .= "    on c.relnamespace = n.oid ";
-   $tables_q .= " where c.relkind = 'r' ";
-   $tables_q .= "   and n.nspname = '$schema' ";
-   $tables_q .= "   and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$' ";
-   unless( $opts{'a'} )
-   {
-        $tables_q .= "   and c.relname < 'tb_audit_event_' ";
-        $tables_q .= "       || to_char(now() - interval '$months months', 'YYYYMMDD_HH24MI') ";
-   }
-   $tables_q .= " order by 1 ";
-
-my $table_rows = $handle->selectall_arrayref($tables_q)
-    or die "Could not get list of audit archive tables\n";
+# Returns arrayref of hashrefs, each hash containing keys 'table_name' and 'table_size_pretty'
+my $table_rows = get_cyanaudit_data_table_list($handle);
 
 foreach my $table_row (@$table_rows)
 {
-    my ($table, $size, $remove) = @$table_row;
-    my $file = "$table.csv";
+    my $table_name = $table_row->{'table_name'};
+    my $table_size_pretty = $table_row->{'table_size_pretty'};
     
-    my @glob_results = glob( "$outdir/$file.*" );
+    my $outfile = "$table_name.csv.gz";
 
-    if( @glob_results and not $opts{'c'} )
+    if( md5_verify($outfile) )
     {
-        print "Found existing backup for table $table.\n";
+        print "Skipping backup for table $table_name: Valid backup already present.\n";
+        next;
     }
-    else
+
+    my $exporting_msg = "Exporting $schema.$table_name ($table_size_pretty)";
+    print "$exporting_msg: ";
+    print "Preparing... " if( -t STDIN );
+
+    my $total_rows_q = <<SQL;
+        select reltuples::bigint
+          from pg_class
+         where oid = '$schema.$table_name'::regclass
+SQL
+
+    my ($total_rows) = $handle->selectrow_array($total_rows_q);
+
+    $total_rows = 1 if $total_rows == 0;
+
+    my $data_q = <<SQL;
+           select ae.recorded,
+                  ae.txid,
+                  ae.uid,
+                  att.label as description,
+                  af.table_schema,
+                  af.table_name,
+                  ae.pk_vals,
+                  ae.row_op,
+                  af.column_name,
+                  ae.old_value,
+                  ae.new_value
+             from $schema.$table_name ae
+             join $schema.tb_audit_field af
+               on ae.audit_field = af.audit_field
+        left join $schema.tb_audit_transaction_type att
+               on ae.audit_transaction_type = att.audit_transaction_type
+         order by recorded
+SQL
+
+    $handle->do("copy ($data_q) to stdout with csv header");
+
+    open( my $fh, "| gzip -9 -c > $outfile" ) or die "Could not open output for writing: $!\n";
+
+    my $row;
+    my $row_count = 0;
+
+    while( $handle->pg_getcopydata(\$row) >= 0 )
     {
+        my $row_encoded = encode( 'UTF-8', $row, Encode::FB_CROAK );
 
-        my $exporting_msg = "Exporting $schema.$table ($size)";
+        print $fh $row_encoded or die "Error writing to output: $!\n";
+        $row_count++;
 
-        print "$exporting_msg: ";
-        
-        print " Preparing... " if( -t STDIN );
-
-        my $min_q = "select audit_event "
-                  . "  from $schema.$table "
-                  . " where recorded = "
-                  . "       ( "
-                  . "           select min(recorded) "
-                  . "             from $schema.$table "
-                  . "       ) "
-                  . " limit 1 ";
-
-        my ($min_audit_event) = $handle->selectrow_array($min_q);
-
-        my $max_q = "select audit_event "
-                  . "  from $schema.$table "
-                  . " where recorded = "
-                  . "       ( "
-                  . "           select max(recorded) "
-                  . "             from $schema.$table "
-                  . "       ) "
-                  . " limit 1 ";
-
-        my ($max_audit_event) = $handle->selectrow_array($max_q);
-
-        my $data_q = "   select ae.audit_event, "
-                   . "          ae.txid, "
-                   . "          ae.recorded, "
-                   . "          ae.uid, "
-                   . "          u.$user_table_email_col, "
-                   . "          af.table_name, "
-                   . "          af.column_name, "
-                   . "          adt.name as data_type, "
-                   . "          ae.row_pk_val, "
-                   . "          ae.row_op, "
-                   . "          ae.pid, "
-                   . "          att.label as description, "
-                   . "          ae.old_value, "
-                   . "          ae.new_value "
-                   . "     from $schema.$table ae "
-                   . "     join $schema.tb_audit_field af "
-                   . "       on ae.audit_field = af.audit_field "
-                   . "     join $schema.tb_audit_data_type adt "
-                   . "       on adt.audit_data_type = af.audit_data_type "
-                   . "left join $schema.tb_audit_transaction_type att "
-                   . "       on ae.audit_transaction_type = att.audit_transaction_type "
-                   . "     join $user_table u "
-                   . "       on ae.uid = u.$user_table_uid_col "
-                   . " order by recorded ";
-
-        $handle->do("copy ($data_q) to stdout with csv header");
-
-        my $open_str = "> $outdir/$table.csv";
-
-        if( $opts{'z'} )
+        if ( -t STDIN and $row_count > 1 ) 
         {
-            $open_str = "| gzip -9 -c $open_str.gz";
-        }
+            my $current_percent = $row_count / $total_rows * 100;
+            $current_percent = 99.9 if( $current_percent > 99.9 );
 
-        open( my $fh, $open_str ) or die "Could not open output for writing: $!\n";
-
-        my $row;
-        my $row_count = 0;
-
-        while( $handle->pg_getcopydata(\$row) >= 0 )
-        {
-            my $row_encoded = encode( 'UTF-8', $row, Encode::FB_CROAK );
-
-            print $fh $row_encoded or die "Error writing to file: $!\n";
-
-            if ( -t STDIN and $row_count > 1 ) 
+            if( $row_count % 1000 == 0 ) 
             {
-                (my $current_audit_event = $row_encoded) =~ s/,.*$//s;
-
-                my $current_percent = ($current_audit_event - $min_audit_event) /
-                                      ($max_audit_event - $min_audit_event) * 100;
-
-                if( $row_count % 1000 == 1 or $current_percent == 100 ) 
-                {
-                    printf "\r$exporting_msg: %0.1f%% complete... ",
-                            $current_percent;
-                }
+                printf "\r$exporting_msg: $row_count rows written (%0.1f%% complete)... ",
+                        $current_percent;
             }
-
-            $row_count++;
         }
-
-        print "Done!\n";
     }
 
-    if( $opts{'r'} and $remove )
-    {
-        print "Dropping table $schema.$table... ";
-        $handle->do("alter extension cyanaudit drop table $schema.$table");
-        $handle->do("drop table $schema.$table");
-        print "Done\n";
-    }
+    printf "\r$exporting_msg: $row_count rows written (100.0%% complete)... ",
+
+    close( $fh );
+
+    md5_write( $outfile );
+
+    print "Done!\n";
 }

@@ -25,7 +25,8 @@ sub usage
         . "  -d db      Connect to given database\n"
         . "  -h host    Connect to given host\n"
         . "  -p port    Connect on given port\n"
-        . "  -U user    Connect as given user\n";
+        . "  -U user    Connect as given user\n"
+        . "  -m ##      Remove tables older than ## months\n";
 
     exit 1;
 }
@@ -234,6 +235,34 @@ $handle->do($q) or die "Could not set tablespace of recorded index\n";
 $q = "alter index $schema.${table_name}_audit_field_idx "
    . "  set tablespace $tablespace ";
 $handle->do($q) or die "Could not set tablespace of audit_field index\n";
+
+
+### Remove old tables
+
+#my $tables_q = <<SQL;
+#    select c.relname,
+#           pg_size_pretty(pg_total_relation_size(c.oid)),
+#           c.relname < 'tb_audit_event_'
+#           || to_char(now() - interval '$months months', 'YYYYMMDD_HH24MI')
+#      from pg_class c
+#      join pg_namespace n
+#        on c.relnamespace = n.oid
+#     where c.relkind = 'r'
+#       and n.nspname = '$schema'
+#       and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$'
+#       and c.relname < 'tb_audit_event_'
+#           || to_char(now() - interval '$months months', 'YYYYMMDD_HH24MI')
+#SQL
+
+# foreach table...
+
+#if( $remove )
+#{
+#    print "Dropping table $schema.$table... ";
+#    $handle->do("alter extension cyanaudit drop table $schema.$table");
+#    $handle->do("drop table $schema.$table");
+#    print "Done\n";
+#}
 
 print "Done\n";
 

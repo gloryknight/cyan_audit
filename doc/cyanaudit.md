@@ -306,6 +306,17 @@ Functions
   
   A shortcut for `fn_undo_transaction( fn_get_last_audit_txid() )`
 
+* `fn_update_audit_fields( schema )`
+
+  Scans all tables & columns in the given schema and updates tb_audit_field as
+  appropriate, adding rows for new columns and setting loggable = false for
+  dropped columns. If schema is null, re-scans all schemas currently known to
+  Cyan Audit, and updates tb_audit_field with any changes found.
+
+
+Configuration Parameters
+------------------------
+
 * `cyanaudit.enabled`
 
   This configuration parameter can be set on a session-by-session basis to
