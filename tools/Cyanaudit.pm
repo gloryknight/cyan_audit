@@ -24,10 +24,10 @@ sub db_connect($)
 {
     my ($params) = @_;
 
-    my $port = $params->{'port'} || $ENV{'PGPORT'} || 5432;
-    my $host = $params->{'host'} || $ENV{'PGHOST'} || '/tmp';
-    my $user = $params->{'user'} || $ENV{'PGUSER'} || 'postgres';
-    my $dbname = $params->{'dbname'} || $ENV{'PGDATABASE'}
+    my $port = $params->{'p'} || $ENV{'PGPORT'} || 5432;
+    my $host = $params->{'h'} || $ENV{'PGHOST'} || '/tmp';
+    my $user = $params->{'U'} || $ENV{'PGUSER'} || 'postgres';
+    my $dbname = $params->{'d'} || $ENV{'PGDATABASE'}
         or die "Must specify database name or set PGDATABASE environment variable\n";
 
     $port =~ /^\d+$/ or die "Invalid port: '$port'\n";
@@ -126,11 +126,9 @@ sub get_cyanaudit_data_table_list($)
             on c.relnamespace = n.oid
          where c.relkind = 'r'
            and n.nspname = '$schema'
-           and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$'
+           and c.relname ~ '^tb_audit_event_(\\d{8}_\\d{4}\$|current)'
          order by 1
 SQL
 
     return $handle->selectall_arrayref( $tables_q, { Slice => {} } );
 }
-
-

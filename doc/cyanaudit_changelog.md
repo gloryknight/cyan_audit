@@ -3,11 +3,15 @@
 - Added support for logging tables with multi-column PKs
 - Changed table trigger to call generic logging function instead of calling a
   different (dynamically-created) trigger function for each table.
-- Lots and lots of code cleanup
 - Fixed a bug with cyanaudit_dump.pl where it was not dropping old archive
   tables as intended, even though -r was specified, and the table was older than
   the -m value. This happened in the typical case where the table's backup file
   was already present before the script was run and -c was not specified.
+- Improved cyanaudit_dump.pl to write md5 checksums so that it can determine
+  whether an existing backup file is complete or if it needs to be rewritten.
+- Simplified cyanaudit_dump.pl by removing archival functionality. This
+  functionality is now moved into the function fn_prune_audit_log_archive().
+- Lots and lots of code cleanup
 
 0.9.5 -> 0.9.6
 --------------
@@ -20,7 +24,6 @@
 - Simplified code by now requiring at least PostgreSQL version 9.3.3.
 - Dropped tb_audit_event.pid, which was not used.
 - Dropped unneeded tb_audit_field.audit_data_type and tb_audit_data_type.
-
 
 0.9.4 -> 0.9.5
 --------------

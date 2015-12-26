@@ -35,18 +35,11 @@ usage( "Output directory '$outdir' is invalid" ) unless( -d $outdir );
 usage( "Output directory '$outdir' is not writable" ) unless ( -w $outdir );
 chdir( $outdir ) or die "Could not chdir($outdir): $!\n";
 
-my $params = {
-    port => $opts{'p'},
-    user => $opts{'U'},
-    dbname => $opts{'d'},
-    host => $opts{'h'}
-};
-
-my $handle = db_connect($params) 
+my $handle = db_connect( \%opts ) 
     or die "Could not connect to database: $DBI::errstr\n";;
 
 my $schema = get_cyanaudit_schema($handle)
-    or die "Could not determine cyanaudit schema.\n";
+    or die "Could not find Cyan Audit in given database.\n";
 
 print "Found Cyan Audit in schema '$schema'.\n";
 
@@ -60,13 +53,13 @@ foreach my $table_row (@$table_rows)
     
     my $outfile = "$table_name.csv.gz";
 
-    if( md5_verify($outfile) )
+    if( $outfile ne 'tb_audit_event_current.csv.gz' and md5_verify($outfile) )
     {
         print "Skipping backup for table $table_name: Valid backup already present.\n";
         next;
     }
 
-    my $exporting_msg = "Exporting $schema.$table_name ($table_size_pretty)";
+    my $exporting_msg = "Exporting $table_name ($table_size_pretty)";
     print "$exporting_msg: ";
     print "Preparing... " if( -t STDIN );
 
@@ -105,7 +98,7 @@ SQL
     open( my $fh, "| gzip -9 -c > $outfile" ) or die "Could not open output for writing: $!\n";
 
     my $row;
-    my $row_count = 0;
+    my $row_count = -1; # accommodate header
 
     while( $handle->pg_getcopydata(\$row) >= 0 )
     {
@@ -114,7 +107,7 @@ SQL
         print $fh $row_encoded or die "Error writing to output: $!\n";
         $row_count++;
 
-        if ( -t STDIN and $row_count > 1 ) 
+        if ( -t STDIN and $row_count > 0 ) 
         {
             my $current_percent = $row_count / $total_rows * 100;
             $current_percent = 99.9 if( $current_percent > 99.9 );

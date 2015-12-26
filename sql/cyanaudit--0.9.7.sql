@@ -645,7 +645,6 @@ create index tb_audit_event_current_audit_field_idx
     on @extschema@.tb_audit_event_current(audit_field);
 
 
-
 --------------------
 ------ VIEWS -------
 --------------------
@@ -896,6 +895,171 @@ CREATE TRIGGER tr_after_audit_field_change
 
 --------- Audit event archiving -----------
 
+-- fn_audit_log_switch
+-- Must run fn_finalize_audit_log_switch() after this in separate transaction.
+CREATE OR REPLACE FUNCTION @extschema@.fn_audit_log_switch()
+returns varchar as
+ $_$
+declare
+    my_table_name       varchar;
+    my_index_column     varchar;
+    my_q                varchar;
+begin
+    perform * from @extschema@.tb_audit_event_current;
+
+    if not found then
+        return null;
+    end if;
+
+    CREATE TABLE @extschema@.tb_audit_event_temp ()
+        INHERITS ( @extschema@.tb_audit_event );
+
+    ALTER EXTENSION cyanaudit 
+        ADD TABLE @extschema@.tb_audit_event_temp;
+
+
+    -- Permissions
+    GRANT INSERT,
+          SELECT( audit_transaction_type, txid ),
+          UPDATE( audit_transaction_type )
+       ON @extschema@.tb_audit_event_temp
+       TO public;
+
+
+    -- Indexes
+    my_table_name := 'tb_audit_event_' || to_char(now(), 'YYYYMMDD_HH24MI');
+
+    foreach my_index_column in array
+        ARRAY[ 'txid', 'recorded', 'audit_field' ] 
+    loop
+        execute format( 'ALTER INDEX @extschema@.%I RENAME to %I', 
+                        'tb_audit_event_current_'||my_index_column||'_idx',
+                        my_table_name||'_'||my_index_column||'_idx' );
+
+        execute format( 'CREATE INDEX %I on @extschema@.tb_audit_event_temp (%I)',
+                        'tb_audit_event_current_'||my_index_column||'_idx',
+                        my_index_column );
+    end loop;
+
+
+    -- Indiana Jones Swap
+    execute format( 'ALTER TABLE @extschema@.tb_audit_event_current '
+                 || ' RENAME TO %I', my_table_name );
+
+    ALTER TABLE @extschema@.tb_audit_event_temp
+        RENAME TO tb_audit_event_current;
+
+    return my_table_name;
+end
+ $_$
+    language plpgsql;
+
+
+-- fn_finalize_audit_log_switch
+-- Needs to run in separate transaction from fn_audit_log_switch
+CREATE OR REPLACE FUNCTION @extschema@.fn_finalize_audit_log_switch
+(
+    in_table_name   varchar
+)
+returns void as
+ $_$
+declare
+    my_min_recorded         timestamp;
+    my_max_recorded         timestamp;
+    my_min_txid             bigint;
+    my_max_txid             bigint;
+    my_archive_tablespace   varchar;
+    my_index_column         varchar;
+begin
+    execute format( 'select min(recorded), max(recorded), min(txid), max(txid) '
+                 || ' from @extschema@.%I ', 
+                    in_table_name )
+       into my_min_recorded, my_max_recorded, my_min_txid, my_max_txid;
+
+    my_archive_tablespace := current_setting( 'cyanaudit.archive_tablespace' );
+
+    -- tb_audit_event_current will not have range bounds if it's the first one
+    -- ever created by the extension.
+    perform *
+       from pg_class c
+       join pg_namespace n
+         on c.relnamespace = n.oid
+       join pg_constraint cn
+         on cn.conrelid = c.oid
+        and cn.contype = 'c'
+        and cn.conname = 'tb_audit_event_current_recorded_check'
+        and n.nspname = @extschema@
+        and c.relname = in_table_name;
+
+    if found then
+        execute format( 'alter table @extschema@.%I '
+                     || ' drop constraint tb_audit_event_current_recorded_check ',
+                        in_table_name );
+    end if;
+
+    execute format( 'alter table @extschema@.%I '
+                 || ' add check( recorded between %L and %L ), '
+                 || ' add check( txid     between %L and %L ) ',
+                    in_table_name,
+                    my_min_recorded, my_max_recorded,
+                    my_min_txid, my_max_txid );
+    
+    execute format( 'alter table @extschema@.tb_audit_event_current '
+                 || ' add constraint tb_audit_event_current_recorded_check '
+                 || ' check( recorded > %L ) ',
+                    my_max_recorded );
+
+    execute format( 'alter table @extschema@.%I set tablespace %I',
+                    in_table_name,
+                    my_archive_tablespace );
+
+    foreach my_index_column in array
+        ARRAY[ 'txid', 'recorded', 'audit_field' ] 
+    loop
+        execute format( 'alter index @extschema@.%I set tablespace %I',
+                        in_table_name||'_'||my_index_column||'_idx',
+                        my_archive_tablespace );
+    end loop;
+
+    execute format( 'revoke all privileges on @extschema@.%I from public', in_table_name );
+end
+ $_$
+    language plpgsql strict;
+
+
+-- fn_prune_audit_log_archive
+-- Returns names of tables dropped
+CREATE OR REPLACE FUNCTION @extschema@.fn_prune_audit_log_archive
+(
+    in_keep_interval    interval
+)
+returns setof varchar as 
+ $_$
+declare
+    my_table_name           varchar;
+    my_min_keep_table_name  varchar;
+begin
+    select 'tb_audit_event_' || to_char( now() - in_keep_interval, 'YYYYMMDD_HH24MI' )
+      into my_min_keep_table_name;
+
+    for my_table_name in
+        select c.relname
+          from pg_class c
+          join pg_namespace n
+            on c.relnamespace = n.oid
+           and n.nspname = @extschema@
+         where c.relkind = 'r'
+           and c.relname ~ '^tb_audit_event_\d{8}_\d{4}$'
+           and c.relname < my_min_keep_table_name
+    loop
+        execute 'alter extension cyanaudit drop table @extschema@.'||quote_ident(my_table_name);
+        execute 'drop table @extschema@.'||quote_ident(my_table_name);
+    end loop;
+end
+ $_$
+    language plpgsql strict;
+    
+
 create or replace function @extschema@.fn_redirect_audit_events() 
 returns trigger as
  $_$
@@ -909,8 +1073,6 @@ end
 create trigger tr_redirect_audit_events 
     before insert on @extschema@.tb_audit_event
     for each row execute procedure @extschema@.fn_redirect_audit_events();
-
-
 
 
 -- EVENT TRIGGER

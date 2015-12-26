@@ -61,13 +61,6 @@ my %opts;
 
 getopts( 'U:h:p:d:', \%opts ) or usage();
 
-my $params = {
-    port => $opts{'p'},
-    user => $opts{'U'},
-    dbname => $opts{'d'},
-    host => $opts{'h'}
-};
-
 unless( @ARGV )
 {
     usage( "Must specify at least one file to restore" );
@@ -86,11 +79,11 @@ foreach my $file (@ARGV)
     }
 }
 
-my $handle = db_connect( $params )
+my $handle = db_connect( \%opts )
     or die "Could not connect to database: $DBI::errstr\n";
 
 my $schema = get_cyanaudit_schema( $handle )
-    or die sprintf( "Could not find cyanaudit in database '%s'\n", $params->{'dbname'} ) ;
+    or die "Could not find cyanaudit in given database";
 
 print "Found Cyan Audit in schema '$schema'\n";
 
@@ -103,13 +96,13 @@ print "Using tablespace $tablespace\n";
 my %audit_fields;
 my %audit_transaction_types;
 
-my $lookup_handle = db_connect( $params )
+my $lookup_handle = db_connect( \%opts )
     or die "Could not connect to database: $DBI::errstr\n";
 
-my $audit_field_q = "select fn_get_or_create_audit_field(?,?,?)";
+my $audit_field_q = "select $schema.fn_get_or_create_audit_field(?,?,?)";
 my $audit_field_sth = $lookup_handle->prepare($audit_field_q);
 
-my $audit_transaction_type_q = "select fn_get_or_create_audit_transaction_type(?)";
+my $audit_transaction_type_q = "select $schema.fn_get_or_create_audit_transaction_type(?)";
 my $audit_transaction_type_sth = $lookup_handle->prepare($audit_transaction_type_q);
     
 my $csv_xs = new Text::CSV_XS;
@@ -128,9 +121,13 @@ foreach my $file( @ARGV )
             binary => 1
         },
         filter => sub { 
-            if( $_->{'pk_val'} )
+            if( $_->{'row_pk_val'} )
             {
-                $_->{'pk_vals'} = '{' . $->{'pk_val'} . '}';
+                $_->{'pk_vals'} = '{' . $_->{'row_pk_val'} . '}';
+            }
+            unless( $_->{'table_schema'} )
+            {
+                $_->{'table_schema'} = 'public';
             }
             return $_; 
         }

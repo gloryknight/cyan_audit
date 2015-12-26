@@ -3,7 +3,7 @@ EXTVERSION   = $(shell grep default_version $(EXTENSION).control | \
                sed -e "s/default_version[[:space:]]*=[[:space:]]*'\\([^']*\\)'/\\1/")
 
 DOCS         = $(wildcard doc/*.md)
-SCRIPTS      = $(wildcard tools/*)
+SCRIPTS      = $(wildcard tools/*.p[lm]) $(wildcard tools/*.sh)
 
 PG_CONFIG    = pg_config
 DATA         = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION)--$(EXTVERSION).sql
@@ -11,6 +11,9 @@ PKG_SQL      = $(wildcard sql/$(EXTENSION)--*--*.sql)
 
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
+
+tags:
+	ctags -f .tags -h ".pm" -R .
 
 
 ###############################
