@@ -39,11 +39,12 @@ my $schema = get_cyanaudit_schema($handle)
 print "Found cyanaudit in schema '$schema'\n";
 
 
-my ($table_name) = $handle->selectrow_array( "select $schema.fn_audit_log_switch()" ); 
+my ($table_name) = $handle->selectrow_array( "select $schema.fn_create_new_audit_event_partition()" ); 
 die "Audit log rotation not performed: no events present.\n" unless( $table_name );
 
 print "Created new archive table $schema.$table_name.\n";
 
 print "Finalizing indexes and constraints... ";
-$handle->do( "select $schema.fn_finalize_audit_log_switch( ? )", undef, $table_name );
+$handle->do( "select $schema.fn_add_final_partition_range_constraint( ? )", undef, $table_name );
+$handle->do( "select $schema.fn_archive_audit_event_partition( ? )", undef, $table_name );
 print "Done\n";
