@@ -3,9 +3,7 @@
  - function to set and unset real-time transaction label
 */
    
-------------------------
------- FUNCTIONS ------
-------------------------
+----- INITIAL SETUP -----
 do language plpgsql
  $$
 declare
@@ -33,6 +31,15 @@ begin
     execute my_command || '_last_txid = 0';
 end;
  $$;
+
+
+
+
+------------------------
+------ FUNCTIONS ------
+------------------------
+
+----- User/Application Functions ----
 
 -- fn_set_audit_uid
 CREATE OR REPLACE FUNCTION @extschema@.fn_set_audit_uid
@@ -69,6 +76,170 @@ end
  $_$;
 
 
+-- fn_get_last_audit_txid
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_last_audit_txid()
+returns bigint
+language sql stable
+as $_$
+    SELECT (nullif(current_setting('cyanaudit._last_txid'), '0'))::bigint;
+ $_$;
+
+
+-- fn_label_audit_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_audit_transaction
+(
+    in_label    varchar,
+    in_txid     bigint default txid_current()
+)
+returns bigint 
+language plpgsql strict
+as $_$
+declare
+    my_audit_transaction_type   integer;
+begin
+    select @extschema@.fn_get_or_create_audit_transaction_type(in_label)
+      into my_audit_transaction_type;
+
+    update @extschema@.tb_audit_event
+       set audit_transaction_type = my_audit_transaction_type
+     where txid = in_txid
+       and audit_transaction_type is null;
+
+    return in_txid;
+end
+ $_$;
+
+
+
+-- fn_label_last_audit_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_audit_transaction
+(
+    in_label    varchar
+)
+returns bigint
+language sql strict
+as $_$
+    select @extschema@.fn_label_audit_transaction
+           (
+                in_label, 
+                @extschema@.fn_get_last_audit_txid()
+           );
+ $_$;
+
+-- fn_undo_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_undo_transaction
+(
+    in_txid   bigint
+)
+returns setof varchar
+language plpgsql strict
+as $_$
+declare
+    my_statement    varchar;
+begin
+    for my_statement in
+        select query 
+          from vw_audit_transaction_statement_inverse
+         where txid = in_txid
+    loop
+        execute my_statement;
+        return next my_statement;
+    end loop;
+
+    perform @extschema@.fn_label_audit_transaction('Undo transaction');
+
+    return;
+end
+ $_$;
+
+
+-- fn_undo_last_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_undo_last_transaction()
+returns setof varchar as
+ $_$
+    select @extschema@.fn_undo_transaction(@extschema@.fn_get_last_audit_txid());
+ $_$
+    language 'sql';
+
+
+
+-- fn_update_audit_fields
+-- Create or update audit_fields for all columns in the passed-in schema.
+-- If passed-in schema is null, create or update for all already-known schemas.
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields
+(
+    in_schema            varchar default null
+) 
+returns void as
+ $_$
+declare
+    my_schemas           varchar[];
+begin
+    if pg_trigger_depth() > 0 then
+        return;
+    end if;
+
+    -- Add only those tables in the passed-in schemas. 
+    -- If no schemas are passed in, use only those we already know about.
+    -- This way, we will never log any schema that has not been explicitly
+    -- requested to be logged.
+    select case when in_schema is not null
+                then ARRAY[ in_schema ]
+                else array_agg( distinct table_schema )
+           end
+      into my_schemas
+      from @extschema@.tb_audit_field;
+
+    with tt_audit_fields as
+    (
+        select coalesce
+               (
+                    af.audit_field,
+                    @extschema@.fn_get_or_create_audit_field
+                    ( 
+                        n.nspname::varchar,
+                        c.relname::varchar,
+                        a.attname::varchar
+                    )
+               ) as audit_field,
+               (a.attnum is null and af.loggable) as stale
+          from (
+                    pg_class c
+               join pg_attribute a
+                 on a.attrelid = c.oid
+                and a.attnum > 0
+                and a.attisdropped is false
+               join pg_namespace n
+                 on c.relnamespace = n.oid
+                and n.nspname::varchar = any( my_schemas )
+               join pg_constraint cn
+                 on conrelid = c.oid
+                and cn.contype = 'p'
+               ) 
+     full join @extschema@.tb_audit_field af
+            on af.table_schema = n.nspname::varchar
+           and af.table_name   = c.relname::varchar
+           and af.column_name  = a.attname::varchar
+           and af.loggable is true
+    )
+    update @extschema@.tb_audit_field af
+       set loggable = false
+      from tt_audit_fields ttaf
+     where af.audit_field = ttaf.audit_field
+       and af.loggable
+       and ttaf.stale;
+
+    return;
+end;
+ $_$
+    language 'plpgsql';
+
+
+
+
+
+---- INTERNAL UTILITY FUNCTIONS ----
+
 -- fn_set_last_audit_txid
 CREATE OR REPLACE FUNCTION @extschema@.fn_set_last_audit_txid
 (
@@ -78,15 +249,6 @@ returns bigint
 language sql strict
 as $_$
     SELECT (set_config('cyanaudit._last_txid', $1::varchar, false))::bigint;
- $_$;
-
-
--- fn_get_last_audit_txid
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_last_audit_txid()
-returns bigint
-language sql stable
-as $_$
-    SELECT (nullif(current_setting('cyanaudit._last_txid'), '0'))::bigint;
  $_$;
 
 
@@ -264,84 +426,6 @@ end
  $_$;
 
         
--- fn_label_audit_transaction
-CREATE OR REPLACE FUNCTION @extschema@.fn_label_audit_transaction
-(
-    in_label    varchar,
-    in_txid     bigint default txid_current()
-)
-returns bigint 
-language plpgsql strict
-as $_$
-declare
-    my_audit_transaction_type   integer;
-begin
-    select @extschema@.fn_get_or_create_audit_transaction_type(in_label)
-      into my_audit_transaction_type;
-
-    update @extschema@.tb_audit_event
-       set audit_transaction_type = my_audit_transaction_type
-     where txid = in_txid
-       and audit_transaction_type is null;
-
-    return in_txid;
-end
- $_$;
-
-
-
--- fn_label_last_audit_transaction
-CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_audit_transaction
-(
-    in_label    varchar
-)
-returns bigint
-language sql strict
-as $_$
-    select @extschema@.fn_label_audit_transaction
-           (
-                in_label, 
-                @extschema@.fn_get_last_audit_txid()
-           );
- $_$;
-
--- fn_undo_transaction
-CREATE OR REPLACE FUNCTION @extschema@.fn_undo_transaction
-(
-    in_txid   bigint
-)
-returns setof varchar
-language plpgsql strict
-as $_$
-declare
-    my_statement    varchar;
-begin
-    for my_statement in
-        select query 
-          from vw_audit_transaction_statement_inverse
-         where txid = in_txid
-    loop
-        execute my_statement;
-        return next my_statement;
-    end loop;
-
-    perform @extschema@.fn_label_audit_transaction('Undo transaction');
-
-    return;
-end
- $_$;
-
-
--- fn_undo_last_transaction
-CREATE OR REPLACE FUNCTION @extschema@.fn_undo_last_transaction()
-returns setof varchar as
- $_$
-    select @extschema@.fn_undo_transaction(@extschema@.fn_get_last_audit_txid());
- $_$
-    language 'sql';
-
-
-
 -- fn_get_or_create_audit_field
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_field
 (
@@ -391,8 +475,7 @@ end
     language 'plpgsql';
         
 
-
-
+-- fn_log_audit_event
 CREATE OR REPLACE FUNCTION @extschema@.fn_log_audit_event()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -497,78 +580,6 @@ $_$;
 
 
 
--- fn_update_audit_fields
--- Create or update audit_fields for all columns in the passed-in schema.
--- If passed-in schema is null, create or update for all already-known schemas.
-CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields
-(
-    in_schema            varchar default null
-) 
-returns void as
- $_$
-declare
-    my_schemas           varchar[];
-begin
-    if pg_trigger_depth() > 0 then
-        return;
-    end if;
-
-    -- Add only those tables in the passed-in schemas. 
-    -- If no schemas are passed in, use only those we already know about.
-    -- This way, we will never log any schema that has not been explicitly
-    -- requested to be logged.
-    select case when in_schema is not null
-                then ARRAY[ in_schema ]
-                else array_agg( distinct table_schema )
-           end
-      into my_schemas
-      from @extschema@.tb_audit_field;
-
-    with tt_audit_fields as
-    (
-        select coalesce
-               (
-                    af.audit_field,
-                    @extschema@.fn_get_or_create_audit_field
-                    ( 
-                        n.nspname::varchar,
-                        c.relname::varchar,
-                        a.attname::varchar
-                    )
-               ) as audit_field,
-               (a.attnum is null and af.loggable) as stale
-          from (
-                    pg_class c
-               join pg_attribute a
-                 on a.attrelid = c.oid
-                and a.attnum > 0
-                and a.attisdropped is false
-               join pg_namespace n
-                 on c.relnamespace = n.oid
-                and n.nspname::varchar = any( my_schemas )
-               join pg_constraint cn
-                 on conrelid = c.oid
-                and cn.contype = 'p'
-               ) 
-     full join @extschema@.tb_audit_field af
-            on af.table_schema = n.nspname::varchar
-           and af.table_name   = c.relname::varchar
-           and af.column_name  = a.attname::varchar
-           and af.loggable is true
-    )
-    update @extschema@.tb_audit_field af
-       set loggable = false
-      from tt_audit_fields ttaf
-     where af.audit_field = ttaf.audit_field
-       and af.loggable
-       and ttaf.stale;
-
-    return;
-end;
- $_$
-    language 'plpgsql';
-
-
 
 ------------------
 ----- TABLES -----
@@ -617,7 +628,6 @@ SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_transaction_
 
 
 
-
 -- tb_audit_event
 CREATE SEQUENCE @extschema@.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
 
@@ -643,6 +653,9 @@ ALTER TABLE @extschema@.tb_audit_event
 CREATE INDEX tb_audit_event_txid_idx        on @extschema@.tb_audit_event(txid);
 CREATE INDEX tb_audit_event_recorded_idx    on @extschema@.tb_audit_event(recorded);
 CREATE INDEX tb_audit_event_audit_field_idx on @extschema@.tb_audit_event(audit_field);
+
+
+
 
 
 --------------------
@@ -840,7 +853,7 @@ begin
         return NEW;
     end if;
 
-    perform @extschema@.fn_verify_audit_event_partition();
+    perform @extschema@.fn_verify_partition_config();
 
     perform *
        from pg_trigger t
@@ -895,22 +908,7 @@ CREATE TRIGGER tr_after_audit_field_change
 
 
 
---------- Audit event archiving -----------
-
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_latest_audit_event_partition()
-returns varchar as
- $_$
-    select c.relname::varchar
-      from pg_class c
-      join pg_namespace n
-        on c.relnamespace = n.oid
-       and n.nspname = '@extschema@'
-     where c.relkind = 'r'
-       and c.relname ~ '^tb_audit_event_\d{8}_\d{4}$'
-     order by 1 desc
-     limit 1;
- $_$
-    language sql;
+--------- Partitioning -----------
 
 CREATE OR REPLACE FUNCTION @extschema@.fn_parse_tgargs
 (
@@ -933,17 +931,27 @@ RETURNS VARCHAR[] AS
     LANGUAGE SQL IMMUTABLE;
 
 
-CREATE OR REPLACE FUNCTION @extschema@.fn_verify_audit_event_redirect_trigger
-(
-    in_partition_name   varchar
-)
-returns void as
+CREATE OR REPLACE FUNCTION @extschema@.fn_redirect_audit_events() 
+returns trigger as
  $_$
 declare
-    my_tgargs   varchar[];
+    my_table_name   varchar;
 begin
-    select @extschema@.fn_parse_tgargs( tgargs )
-      into my_tgargs
+    my_table_name := TG_ARGV[0];
+
+    execute format( 'insert into @extschema@.%I select $1.*', my_table_name )
+      using NEW;
+
+    return null;
+end
+ $_$
+    language 'plpgsql';
+
+
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_active_partition_name()
+returns varchar as
+ $_$
+    select (@extschema@.fn_parse_tgargs( tgargs ))[1]
       from pg_trigger t
       join pg_class c
         on t.tgrelid = c.oid
@@ -952,15 +960,27 @@ begin
      where n.nspname = '@extschema@'
        and c.relname = 'tb_audit_event'
        and t.tgname = 'tr_redirect_audit_events';
+ $_$
+    language sql;
 
-    if my_tgargs is not null then
-        if my_tgargs[1] = in_partition_name then
-            -- all good
-            return;
-        else
-            -- trigger exists with incorrect parameter
-            DROP TRIGGER tr_redirect_audit_events on @extschema@.tb_audit_event;
-        end if;
+CREATE OR REPLACE FUNCTION @extschema@.fn_activate_partition
+(
+    in_partition_name   varchar
+)
+returns void as
+ $_$
+declare
+    my_active_partition_name   varchar;
+begin
+    my_active_partition_name := @extschema@.fn_get_active_partition_name();
+
+    if my_active_partition_name = in_partition_name then
+        -- already configured correctly
+        return;
+    end if;
+
+    if my_active_partition_name is not null then
+        DROP TRIGGER tr_redirect_audit_events on @extschema@.tb_audit_event;
     end if;
 
     execute format( 'CREATE TRIGGER tr_redirect_audit_events '
@@ -973,47 +993,94 @@ end
     language plpgsql;
 
 
--- fn_create_new_audit_event_partition
-CREATE OR REPLACE FUNCTION @extschema@.fn_create_new_audit_event_partition()
-returns varchar as
+CREATE OR REPLACE FUNCTION @extschema@.fn_setup_partition_range_constraint
+(
+    in_table_name   varchar
+)
+returns void as
  $_$
 declare
-    my_new_table_name varchar;
+    my_min_recorded     timestamp;
+    my_max_recorded     timestamp;
+    my_min_txid         bigint;
+    my_max_txid         bigint;
+    my_constraint_name  varchar;
 begin
-    my_new_table_name := 'tb_audit_event_' || to_char(now(), 'YYYYMMDD_HH24MI');
+    my_constraint_name := 'partition_range_chk';
+
+    perform *
+       from pg_constraint cn
+       join pg_class c
+         on cn.conrelid = c.oid
+       join pg_namespace n
+         on c.relnamespace = n.oid
+      where n.nspname = 'cyanaudit'
+        and cn.conname = my_constraint_name;
+
+    if found then
+        execute format( 'alter table @extschema@.%I drop constraint %I', 
+                        in_table_name, my_constraint_name );
+    end if;
+
+    execute format( 'select min(recorded), max(recorded), min(txid), max(txid) from @extschema@.%I',
+                    in_table_name )
+       into my_min_recorded, my_max_recorded, my_min_txid, my_max_txid;
+
+    if in_table_name = @extschema@.fn_get_active_partition_name() then
+        execute format( 'ALTER TABLE @extschema@.%I add constraint %I '
+                     || ' CHECK( recorded > %L )', 
+                        in_table_name, my_constraint_name, coalesce( my_min_recorded, now() ) );
+    elsif my_min_recorded is not null then
+        execute format( 'ALTER TABLE @extschema@.%I add constraint %I '
+                    || ' CHECK( recorded between %L and %L and txid between %L and %L )',
+                       in_table_name, my_constraint_name,
+                       my_min_recorded, my_max_recorded, my_min_txid, my_max_txid );
+    end if;
+end
+ $_$
+    language plpgsql;
+
+
+-- fn_create_new_partition
+CREATE OR REPLACE FUNCTION @extschema@.fn_create_new_partition
+(
+    in_new_table_name varchar default 'tb_audit_event_' || to_char(now(), 'YYYYMMDD_HH24MI')
+)
+returns varchar as
+ $_$
+begin
+    if in_new_table_name !~ '^tb_audit_event_\d{8}_\d{4}$' then
+        raise exception 'Table name must conform to format "tb_audit_event_########_####"';
+    end if;
 
     SET LOCAL client_min_messages to WARNING;
 
     execute format( 'CREATE TABLE @extschema@.%I '
                  || '( LIKE @extschema@.tb_audit_event INCLUDING STORAGE INCLUDING INDEXES ) '
                  || 'INHERITS ( @extschema@.tb_audit_event )',
-                    my_new_table_name );
+                    in_new_table_name );
 
-    execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', my_new_table_name );
+    execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', in_new_table_name );
 
-    execute format( 'ALTER TABLE @extschema@.%I add check( recorded > %L ) ',
-                    my_new_table_name, now() );
-
-    perform @extschema@.fn_verify_audit_event_redirect_trigger( my_new_table_name );
-
-    return my_new_table_name;
+    return in_new_table_name;
 end
  $_$
     language plpgsql;
 
 
--- fn_audit_log_switch
--- Must run fn_finalize_audit_log_switch() after this in separate transaction.
-CREATE OR REPLACE FUNCTION @extschema@.fn_verify_audit_event_partition()
+-- fn_verify_partition_config()
+CREATE OR REPLACE FUNCTION @extschema@.fn_verify_partition_config()
 returns varchar as
  $_$
 declare
     my_partition_name   varchar;
 begin
-    my_partition_name := @extschema@.fn_get_latest_audit_event_partition();
+    my_partition_name := @extschema@.fn_get_active_partition_name();
 
     if my_partition_name is null then
-        my_partition_name := @extschema@.fn_create_new_audit_event_partition();
+        my_partition_name := @extschema@.fn_create_new_partition();
+        perform @extschema@.fn_activate_partition( my_partition_name );
+        perform @extschema@.fn_setup_partition_range_constraint( my_partition_name );
     end if;
 
     return my_partition_name;
@@ -1022,33 +1089,11 @@ end
     language plpgsql;
 
 
--- fn_finalize_audit_log_switch
--- Sets upper bounds on partition's constraints and moves partition to archive
--- tablespace. Needs to run in separate transaction from fn_audit_log_switch
-CREATE OR REPLACE FUNCTION @extschema@.fn_add_final_partition_range_constraint 
-(
-    in_partition_name       varchar
-)
-returns void as
- $_$
-declare
-    my_max_recorded         timestamp;
-    my_min_txid             bigint;
-    my_max_txid             bigint;
-begin
-    execute format( 'select min(txid), max(txid), max(recorded) from @extschema@.%I ', 
-                    in_partition_name )
-       into my_max_recorded, my_max_txid;
 
-    if my_max_recorded is not null then
-        execute format( 'alter table @extschema@.%I add check( recorded <= %L and txid between %L and %L ) ',
-                        in_partition_name, my_max_recorded, my_min_txid, my_max_txid );
-    end if;
-end
- $_$
-    language plpgsql;
-        
-CREATE OR REPLACE FUNCTION @extschema@.fn_archive_audit_event_partition
+
+-------- Partition Archiving ---------
+
+CREATE OR REPLACE FUNCTION @extschema@.fn_archive_partition
 (
     in_partition_name   varchar
 )
@@ -1085,9 +1130,8 @@ end
     language plpgsql strict;
 
 
--- fn_prune_audit_log_archive
 -- Returns names of tables dropped
-CREATE OR REPLACE FUNCTION @extschema@.fn_prune_audit_log_archive
+CREATE OR REPLACE FUNCTION @extschema@.fn_prune_archive
 (
     in_keep_interval    interval
 )
@@ -1123,22 +1167,6 @@ end
     language plpgsql strict;
     
 
-
-create or replace function @extschema@.fn_redirect_audit_events() 
-returns trigger as
- $_$
-declare
-    my_table_name   varchar;
-begin
-    my_table_name := TG_ARGV[0];
-
-    execute format( 'insert into @extschema@.%I select $1.*', my_table_name )
-      using NEW;
-
-    return null;
-end
- $_$
-    language 'plpgsql';
 
 
 -- EVENT TRIGGER

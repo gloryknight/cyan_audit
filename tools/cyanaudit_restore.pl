@@ -87,6 +87,12 @@ my $schema = get_cyanaudit_schema( $handle )
 
 print "Found Cyan Audit in schema '$schema'\n";
 
+my $audit_field_count_q = "select count(*) from $schema.tb_audit_field";
+my ($audit_field_count) = $handle->selectrow_array($audit_field_count_q);
+
+( $audit_field_count > 0 )
+    or die "Please run fn_update_audit_fields() before attempting to restore.\n";
+
 my $tablespace_q    = "SELECT current_setting('cyanaudit.archive_tablespace')";
 my ($tablespace)    = $handle->selectrow_array($tablespace_q)
     or die( "Could not determine archive tablespace\n" );
@@ -222,14 +228,32 @@ SQL
         $last_timestamp = $row->{'recorded'}
     }
 
-    print_restore_rate( $table_name, $start_time, $csv->row, $last_timestamp );
-    print "\n";
-
     $handle->pg_putcopyend();
 
     close( $fh ) or die( "Could not close '$file':\n$!\n" );
 
-    #Rename table and add check constraint to partition
+    if( $csv->row == 0 )
+    {
+        print "$table_name: No data to restore.\n";
+        next;
+    }
+    else
+    {
+        print_restore_rate( $table_name, $start_time, $csv->row, $last_timestamp );
+        print "\n";
+    }
+
+    print "Generating indexes...\n" if( DEBUG );
+
+    foreach my $field (qw( audit_field recorded txid ))
+    {
+        $handle->do( "CREATE INDEX ${table_name}_${field}_idx "
+                   . "          ON ${schema}.${table_name}($field) "
+                   . "  TABLESPACE ${tablespace}" )
+            or die "Could not create index on $schema.$table_name($field) ";
+    }
+
+    #Add check constraint to partition
     print "Getting constraint bounds...\n" if( DEBUG );
     my $bounds_q = <<SQL;
         SELECT count(*),
@@ -249,11 +273,6 @@ SQL
     my $max_txid     = $bounds_row->{'max_txid'    };
     my $min_txid     = $bounds_row->{'min_txid'    };
 
-    if( $count < $csv->row - 1 )
-    {
-        die "$file: " . ($csv->row - 1) . " rows read, but only $count rows in table\n";
-    }
-    
     my $constraint_q = '';
     print "Adding constraints...\n" if( DEBUG );
     
@@ -273,16 +292,6 @@ __EOF__
     
     $handle->do( $constraint_q ) or die( "Could not add txid constraint to table partition\n" );
     
-    print "Generating indexes...\n" if( DEBUG );
-
-    foreach my $field (qw( audit_field recorded txid ))
-    {
-        $handle->do( "CREATE INDEX ${table_name}_${field}_idx "
-                   . "          ON ${schema}.${table_name}($field) "
-                   . "  TABLESPACE ${tablespace}" )
-            or die "Could not create index on $schema.$table_name($field) ";
-    }
-
     print "Fixing permissions...\n" if( DEBUG );
     $handle->do( "GRANT INSERT ON ${schema}.${table_name} TO public" )
         or die "Failed to set INSERT perms\n";
