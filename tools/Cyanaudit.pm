@@ -2,11 +2,13 @@ package Cyanaudit;
 
 use utf8;
 use strict;
+use feature "state";
 
 use DBI;
 use File::Basename;
 use Exporter;
 use Digest::MD5;
+use Data::Dumper;
 
 use vars qw( @ISA @EXPORT );
 
@@ -34,7 +36,7 @@ sub db_connect($)
     
     my $connect_string = "dbi:Pg:host=$host;dbname=$dbname;port=$port";
 
-    my $handle = DBI->connect( $connect_string, $user, '' )
+    my $handle = DBI->connect( $connect_string, $user, '', { RaiseError => 1 } )
         or die "Database connect error. Please verify .pgpass and environment variables\n";
 
     return $handle;
@@ -96,18 +98,23 @@ sub get_cyanaudit_schema($)
 {
     my( $handle ) = @_;
 
-    my $schema_q = <<SQL;
-        select n.nspname
-          from pg_extension e
-          join pg_namespace n
-            on e.extnamespace = n.oid
-         where e.extname = 'cyanaudit'
+    state $schema;
+
+    unless( $schema )
+    {
+        my $schema_q = <<SQL;
+            select n.nspname
+              from pg_extension e
+              join pg_namespace n
+                on e.extnamespace = n.oid
+             where e.extname = 'cyanaudit'
 SQL
 
-    my $schema_row = $handle->selectrow_arrayref($schema_q)
-        or return undef;
+        my $schema_row = $handle->selectrow_arrayref($schema_q)
+            or return undef;
 
-    my $schema = $schema_row->[0];
+        $schema = $schema_row->[0];
+    }
 
     return $schema;
 }

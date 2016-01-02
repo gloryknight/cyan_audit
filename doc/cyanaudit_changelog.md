@@ -11,6 +11,9 @@
   whether an existing backup file is complete or if it needs to be rewritten.
 - Simplified cyanaudit_dump.pl by removing archival functionality. This
   functionality is now moved into the function fn_prune_audit_log_archive().
+- Log partition tables are now named according to when they start rather than
+  end, and there is no more tb_audit_current (so that it doesn't have to be
+  renamed, and can be backed up and restored correctly).
 - Lots and lots of code cleanup
 
 0.9.5 -> 0.9.6

@@ -1,9 +1,13 @@
 #!/usr/bin/perl
+# TODO:
+# - Add option for how to behave when partition already exists: skip, replace,
+# append
 
 $|=1;
 
 use strict;
 use warnings;
+use feature "state";
 
 use DBI;
 use Getopt::Std;
@@ -45,16 +49,93 @@ sub microtime()
     return sprintf '%d.%0.6d', gettimeofday();
 }
 
-sub print_restore_rate($$$$)
+sub print_restore_stats($$$)
 {
+    my( $table_name, $rows_restored, $timestamp ) = @_;
+
     return unless( DEBUG );
 
-    my( $table_name, $start_time, $rows_restored, $timestamp ) = @_;
+    state (%start_times);
+
+    $start_times{$table_name} = microtime() unless( $start_times{$table_name} );
+
+    my $start_time = $start_times{$table_name};
+
     my $delta = microtime() - $start_time;
     my $rate = $rows_restored / $delta;
-    printf "\r$table_name: Restored row %d (%-26s) @ %d rows/sec ", 
-        $rows_restored - 1, $timestamp, $rate;
+    printf "\r$table_name: Restored %-26s, total %d rows @ %d rows/sec ", 
+        $timestamp, $rows_restored - 1, $rate;
 }
+
+sub build_db_row_from_csv_row($$)
+{
+    # $csv_row is a row returned from Parse::CSV
+    my( $csv_row, $handle ) = @_;
+
+    my $schema = get_cyanaudit_schema( $handle );
+    
+    state $audit_field_q = "select $schema.fn_get_or_create_audit_field(?,?,?)";
+    state $audit_field_sth = $handle->prepare($audit_field_q);
+
+    state $audit_transaction_type_q = "select $schema.fn_get_or_create_audit_transaction_type(?)";
+    state $audit_transaction_type_sth = $handle->prepare($audit_transaction_type_q);
+    
+    state %audit_fields;
+    state %audit_transaction_types;
+
+    ### Set audit_field ###
+    my $audit_field = $audit_fields{$csv_row->{'table_schema'}}{$csv_row->{'table_name'}}{$csv_row->{'column_name'}};
+
+    unless( $audit_field )
+    {
+        $audit_field_sth->execute( $csv_row->{'table_schema'}, $csv_row->{'table_name'}, $csv_row->{'column_name'} );
+        ($audit_field) = $audit_field_sth->fetchrow_array();
+        unless( $audit_field )
+        {
+            die sprintf( "audit_field %s.%s.%s could not be created/found\n",
+                         $csv_row->{'table_schema'}, $csv_row->{'table_name'}, $csv_row->{'column_name'} );
+        }
+        $audit_fields{$csv_row->{'table_schema'}}{$csv_row->{'table_name'}}{$csv_row->{'column_name'}} = $audit_field;
+    }
+
+    ### Set audit_transaction_type ###
+    my $audit_transaction_type = undef;
+    
+    if( $csv_row->{'description'} )
+    {
+        $audit_transaction_type = $audit_transaction_types{$csv_row->{'description'}};
+
+        unless( $audit_transaction_type )
+        {
+            $audit_transaction_type_sth->execute( $csv_row->{'description'} );
+            ($audit_transaction_type) = $audit_transaction_type_sth->fetchrow_array();
+            unless( $audit_transaction_type )
+            {
+                die sprintf( "audit_transaction_type with label '%s' could not be created/found\n",
+                             $csv_row->{'description'} );
+            }
+            $audit_transaction_types{$csv_row->{'description'}} = $audit_transaction_type;
+        }
+    }
+
+    state $csv_xs = new Text::CSV_XS;
+
+    $csv_xs->combine(
+        $audit_field,
+        $csv_row->{'pk_vals'},
+        $csv_row->{'recorded'},
+        $csv_row->{'uid'},
+        $csv_row->{'row_op'},
+        $csv_row->{'txid'},
+        $audit_transaction_type,
+        $csv_row->{'old_value'},
+        $csv_row->{'new_value'}
+    );
+
+    return $csv_xs->string;
+}
+
+
 
 
 my %opts;
@@ -99,20 +180,6 @@ my ($tablespace)    = $handle->selectrow_array($tablespace_q)
 
 print "Using tablespace $tablespace\n";
 
-my %audit_fields;
-my %audit_transaction_types;
-
-my $lookup_handle = db_connect( \%opts )
-    or die "Could not connect to database: $DBI::errstr\n";
-
-my $audit_field_q = "select $schema.fn_get_or_create_audit_field(?,?,?)";
-my $audit_field_sth = $lookup_handle->prepare($audit_field_q);
-
-my $audit_transaction_type_q = "select $schema.fn_get_or_create_audit_transaction_type(?)";
-my $audit_transaction_type_sth = $lookup_handle->prepare($audit_transaction_type_q);
-    
-my $csv_xs = new Text::CSV_XS;
-
 foreach my $file( @ARGV )
 {
     print "$file: Processing...\n";
@@ -139,14 +206,11 @@ foreach my $file( @ARGV )
         }
     );
 
-    $handle->do( "BEGIN" );
-
-    # Create table partition
     (my $table_name = $file) =~ s/\.csv\.gz$//;
 
-    $handle->do( "CREATE TABLE $schema.$table_name () "
-               . "INHERITS ($schema.tb_audit_event) TABLESPACE ${tablespace}" )
-        or die( "Could not create destination table for CSV contents." );
+    $handle->do( "BEGIN" );
+
+    $handle->do( "SELECT $schema.fn_create_new_partition( '$table_name' )" ) or die;
 
     my $copy_q = <<SQL;
         COPY $schema.$table_name
@@ -160,7 +224,8 @@ foreach my $file( @ARGV )
             audit_transaction_type,
             old_value,
             new_value
-        ) FROM STDIN WITH ( FORMAT csv, HEADER false )
+        ) 
+        FROM STDIN WITH ( FORMAT csv, HEADER false )
 SQL
 
     $handle->do( $copy_q );
@@ -168,62 +233,19 @@ SQL
     my $start_time = microtime();
     my $last_timestamp;
 
+    my $lookup_handle = db_connect( \%opts )
+        or die "Could not connect to database: $DBI::errstr\n";
+
     while( my $row = $csv->fetch )
     {
-        my $audit_field = $audit_fields{$row->{'table_schema'}}{$row->{'table_name'}}{$row->{'column_name'}};
+        my $db_row = build_db_row_from_csv_row( $row, $lookup_handle );
 
-        unless( $audit_field )
+        if( $handle->pg_putcopydata($db_row. "\n") != 1 )
         {
-            $audit_field_sth->execute( $row->{'table_schema'}, $row->{'table_name'}, $row->{'column_name'} );
-            ($audit_field) = $audit_field_sth->fetchrow_array();
-            unless( $audit_field )
-            {
-                die sprintf( "$file: audit_field %s.%s.%s could not be created/found\n",
-                             $row->{'table_schema'}, $row->{'table_name'}, $row->{'column_name'} );
-            }
-            $audit_fields{$row->{'table_schema'}}{$row->{'table_name'}}{$row->{'column_name'}} = $audit_field;
+            die "pg_putcopydata( " . $db_row . " ) failed: " . DBI::errstr . "\n";
         }
 
-        my $audit_transaction_type = undef;
-        
-        if( $row->{'description'} )
-        {
-            $audit_transaction_type = $audit_transaction_types{$row->{'description'}};
-
-            unless( $audit_transaction_type )
-            {
-                $audit_transaction_type_sth->execute( $row->{'description'} );
-                ($audit_transaction_type) = $audit_transaction_type_sth->fetchrow_array();
-                unless( $audit_transaction_type )
-                {
-                    die sprintf( "$file: audit_transaction_type with label '%s' could not be created/found\n",
-                                 $row->{'description'} );
-                }
-                $audit_transaction_types{$row->{'description'}} = $audit_transaction_type;
-            }
-        }
-
-        $csv_xs->combine(
-            $audit_field,
-            $row->{'pk_vals'},
-            $row->{'recorded'},
-            $row->{'uid'},
-            $row->{'row_op'},
-            $row->{'txid'},
-            $audit_transaction_type,
-            $row->{'old_value'},
-            $row->{'new_value'}
-        );
-
-        if( $handle->pg_putcopydata($csv_xs->string . "\n") != 1 )
-        {
-            die "pg_putcopydata( " . $csv_xs->string . " ) failed: " . DBI::errstr . "\n";
-        }
-
-        if( $csv->row % 1000 == 1 )
-        {
-            print_restore_rate( $table_name, $start_time, $csv->row, $row->{'recorded'} );
-        }
+        print_restore_stats( $table_name, $csv->row - 1, $row->{'recorded'} ) unless( ($csv->row - 1) % 1000 );
 
         $last_timestamp = $row->{'recorded'}
     }
@@ -232,82 +254,27 @@ SQL
 
     close( $fh ) or die( "Could not close '$file':\n$!\n" );
 
-    if( $csv->row == 0 )
+    if( $csv->row == 1 )
     {
         print "$table_name: No data to restore.\n";
+        $handle->do("ROLLBACK");
         next;
     }
     else
     {
-        print_restore_rate( $table_name, $start_time, $csv->row, $last_timestamp );
+        print_restore_stats( $table_name, $csv->row - 1, $last_timestamp );
         print "\n";
     }
 
-    print "Generating indexes...\n" if( DEBUG );
+    print "Setting up partition indexes and range constraints...\n" if( DEBUG );
 
-    foreach my $field (qw( audit_field recorded txid ))
-    {
-        $handle->do( "CREATE INDEX ${table_name}_${field}_idx "
-                   . "          ON ${schema}.${table_name}($field) "
-                   . "  TABLESPACE ${tablespace}" )
-            or die "Could not create index on $schema.$table_name($field) ";
-    }
+    $handle->do("SELECT $schema.fn_create_partition_indexes( '$table_name' )" ) or die;
+    $handle->do("SELECT $schema.fn_setup_partition_range_constraint( '$table_name' )" ) or die;
 
-    #Add check constraint to partition
-    print "Getting constraint bounds...\n" if( DEBUG );
-    my $bounds_q = <<SQL;
-        SELECT count(*),
-               max( recorded ) AS max_recorded,
-               min( recorded ) AS min_recorded,
-               max( txid     ) AS max_txid,
-               min( txid     ) AS min_txid
-          FROM ${schema}.$table_name
-SQL
-    
-    my $bounds_row = $handle->selectrow_hashref( $bounds_q )
-        or die( "Could not determine the recorded date range for table partition\n" );
-    
-    my $count        = $bounds_row->{'count'       };
-    my $max_rec      = $bounds_row->{'max_recorded'};
-    my $min_rec      = $bounds_row->{'min_recorded'};
-    my $max_txid     = $bounds_row->{'max_txid'    };
-    my $min_txid     = $bounds_row->{'min_txid'    };
-
-    my $constraint_q = '';
-    print "Adding constraints...\n" if( DEBUG );
-    
-    $constraint_q = <<__EOF__;
-    ALTER TABLE ${schema}.${table_name}
-        ADD CONSTRAINT ${table_name}_recorded_check 
-        CHECK( recorded >= '${min_rec}'::TIMESTAMP AND recorded <= '${max_rec}'::TIMESTAMP )
-__EOF__
-    
-    $handle->do( $constraint_q ) or die( "Could not add recorded constraint to table partition\n" );
-
-    $constraint_q = <<__EOF__;
-    ALTER TABLE ${schema}.${table_name}
-        ADD CONSTRAINT ${table_name}_txid_check 
-        CHECK( txid >= ${min_txid}::BIGINT AND txid <= ${max_txid}::BIGINT )
-__EOF__
-    
-    $handle->do( $constraint_q ) or die( "Could not add txid constraint to table partition\n" );
-    
-    print "Fixing permissions...\n" if( DEBUG );
-    $handle->do( "GRANT INSERT ON ${schema}.${table_name} TO public" )
-        or die "Failed to set INSERT perms\n";
-    $handle->do( "GRANT SELECT (audit_transaction_type,txid) ON ${schema}.${table_name} TO public" )
-        or die "Failed to set SELECT perms\n";
-    $handle->do( "GRANT UPDATE (audit_transaction_type) ON ${schema}.${table_name} TO public" )
-        or die "Failed to set UPDATE perms\n";
-
-    $handle->do( "ALTER EXTENSION cyanaudit ADD TABLE ${schema}.${table_name}" )
-        or die( "Could not add table ${table_name} to cyanaudit extension" );
-
-    $handle->do( "COMMIT" ) or die( "Could not commit restore operation\n" );
-    my $end_time = microtime();
-    my $delta    = ( $end_time - $start_time ) / 60;
+    $handle->do( "COMMIT" ) or die;
+    my $delta    = ( microtime() - $start_time ) / 60;
     printf "Processed '$file' in %d minutes\n", $delta;
 }
 
-print "Successfully processed " . scalar @ARGV . " files.\n";
+print "== DONE ==\nSuccessfully processed " . scalar @ARGV . " files.\n";
 exit 0;

@@ -1,6 +1,8 @@
 /* TODO: 
  - transaction-specific GUC for transaction labels in real-time
  - function to set and unset real-time transaction label
+ - fix current_setting calls to all use accessor function that rethrows exception (or not)
+ - write function to scan extnamespace for partitions and add them to tb_audit_event
 */
    
 ----- INITIAL SETUP -----
@@ -554,11 +556,16 @@ BEGIN
         END IF;
 
         EXECUTE format( 'INSERT INTO @extschema@.tb_audit_event '
-                     || '( audit_field, pk_vals, row_op, old_value, new_value ) '
-                     || 'VALUES(  $1, $2, $3::char(1), $4, $5 ) ',
+                     || '( audit_field, pk_vals, uid, row_op, old_value, new_value ) '
+                     || 'VALUES(  $1, $2, $3, $4::char(1), $5, $6 ) ',
                         my_column_name
                       )
-          USING my_audit_field, my_pk_vals, TG_OP, my_old_value, my_new_value;
+          USING my_audit_field, 
+                my_pk_vals,
+                @extschema@.fn_get_audit_uid(),
+                TG_OP,
+                my_old_value,
+                my_new_value;
     END LOOP;
 
     RETURN NEW;
@@ -636,8 +643,8 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
     audit_field             integer not null references @extschema@.tb_audit_field,
     pk_vals                 varchar[] not null,
     recorded                timestamp not null default clock_timestamp(),
-    uid                     integer not null default @extschema@.fn_get_audit_uid(),
-    row_op                  char(1) not null CHECK (row_op in ('I','U','D')),
+    uid                     integer not null,
+    row_op                  char(1) not null,
     txid                    bigint not null default txid_current(),
     audit_transaction_type  integer references @extschema@.tb_audit_transaction_type,
     old_value               text,
@@ -647,14 +654,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
 ALTER TABLE @extschema@.tb_audit_event
     ADD CONSTRAINT tb_audit_event_consistency_chk
         CHECK( case row_op when 'I' then old_value is null when 'D' then new_value is null 
-                           when 'U' then old_value is distinct from new_value end );
-
--- These are empty "template" indexes to clone when creating child tables.
-CREATE INDEX tb_audit_event_txid_idx        on @extschema@.tb_audit_event(txid);
-CREATE INDEX tb_audit_event_recorded_idx    on @extschema@.tb_audit_event(recorded);
-CREATE INDEX tb_audit_event_audit_field_idx on @extschema@.tb_audit_event(audit_field);
-
-
+                           when 'U' then old_value is distinct from new_value else false end );
 
 
 
@@ -717,7 +717,7 @@ left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type
  group by af.table_schema, af.table_name, ae.row_op, 
           ae.pk_vals, ae.txid, ae.recorded, att.label, 
           @extschema@.fn_get_email_by_audit_uid(ae.uid),
-          fn_get_table_pk_cols(af.table_name, af.table_schema)
+          @extschema@.fn_get_table_pk_cols(af.table_name, af.table_schema)
  order by ae.recorded;
 
 
@@ -755,7 +755,7 @@ CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement_inverse AS
      join @extschema@.tb_audit_field af using(audit_field)
  group by af.table_schema, af.table_name, ae.row_op, 
           ae.pk_vals, ae.recorded, ae.txid,
-          fn_get_table_pk_cols(af.table_name, af.table_schema)
+          @extschema@.fn_get_table_pk_cols(af.table_name, af.table_schema)
  order by ae.recorded desc;
 
 
@@ -866,6 +866,7 @@ begin
         and tgname = 'tr_log_audit_event';
 
     IF FOUND THEN
+        perform @extschema@.fn_remove_trigger_from_extension( NEW.table_schema, NEW.table_name );
         execute format( 'DROP TRIGGER tr_log_audit_event ON %I.%I',
                         NEW.table_schema, NEW.table_name );
     END IF;
@@ -894,6 +895,7 @@ begin
                         my_audit_fields,
                         my_column_names
                       );
+        perform @extschema@.fn_add_trigger_to_extension( NEW.table_schema, NEW.table_name );
     END IF;
 
     return NEW;
@@ -908,8 +910,125 @@ CREATE TRIGGER tr_after_audit_field_change
 
 
 
+CREATE OR REPLACE FUNCTION @extschema@.fn_add_trigger_to_extension
+(
+    in_table_schema varchar,
+    in_table_name   varchar
+)
+returns void as
+ $_$
+    -- Hackish way to set up dependency from trigger to extension
+    INSERT INTO pg_depend
+    WITH tt_dependency AS
+    (
+        SELECT 'pg_trigger'::regclass as classid,
+               (
+                    SELECT t.oid
+                      FROM pg_trigger t
+                      JOIN pg_class c
+                        ON t.tgrelid = c.oid
+                       AND c.relname = in_table_name
+                      JOIN pg_namespace n
+                        ON c.relnamespace = n.oid
+                       AND n.nspname = in_table_schema
+                     WHERE t.tgname = 'tr_log_audit_event'
+               ) as objid,
+               0 as objsubid,
+               'pg_extension'::regclass as refclassid,
+               (SELECT oid FROM pg_extension where extname = 'cyanaudit') as refobjid,
+               0 as refobjsubid,
+               'e'::char as deptype
+    )
+    SELECT tt.*
+      FROM tt_dependency tt
+ LEFT JOIN pg_depend d
+        ON row(tt.*) = row(d.*)
+     WHERE d.classid is null;
+ $_$
+    language sql;
+
+
+CREATE OR REPLACE FUNCTION @extschema@.fn_remove_trigger_from_extension
+(
+    in_table_schema varchar,
+    in_table_name   varchar
+)
+returns void as
+ $_$
+    WITH tt_dependency AS
+    (
+        SELECT 'pg_trigger'::regclass as classid,
+               (
+                    SELECT t.oid
+                      FROM pg_trigger t
+                      JOIN pg_class c
+                        ON t.tgrelid = c.oid
+                       AND c.relname = in_table_name
+                      JOIN pg_namespace n
+                        ON c.relnamespace = n.oid
+                       AND n.nspname = in_table_schema
+                     WHERE t.tgname = 'tr_log_audit_event'
+               ) as objid,
+               0 as objsubid,
+               'pg_extension'::regclass as refclassid,
+               (SELECT oid FROM pg_extension where extname = 'cyanaudit') as refobjid,
+               0 as refobjsubid,
+               'e'::char as deptype
+    )
+    DELETE FROM pg_depend d
+     USING tt_dependency tt
+     WHERE row(d.*) = row(tt.*);
+ $_$
+    language sql;
+
+
 --------- Partitioning -----------
 
+CREATE OR REPLACE FUNCTION @extschema@.fn_create_partition_indexes
+(
+    in_table_name   varchar
+)
+returns void as
+ $_$
+declare
+    my_index_columns    varchar[];
+    my_index_column     varchar;
+    my_index_name       varchar;
+begin
+    my_index_columns := array[ 'recorded', 'txid', 'audit_field' ];
+
+    foreach my_index_column in array my_index_columns
+    loop
+        my_index_name := format( 'ix_%s_%s', right( in_table_name, -3 ), my_index_column );
+
+        perform *
+           from pg_index i
+           join pg_class ci
+             on i.indexrelid = ci.oid
+           join pg_class c
+             on i.indrelid = c.oid
+           join pg_namespace n
+             on c.relnamespace = n.oid
+          where n.nspname = '@extschema@'
+            and c.relname = in_table_name
+            and ci.relname = my_index_name;
+
+        if not found then
+            execute format( 'CREATE INDEX %I on @extschema@.%I ( %I ) TABLESPACE %I',
+                            my_index_name, 
+                            in_table_name, 
+                            my_index_column, 
+                            current_setting( 'cyanaudit.archive_tablespace' ) );
+        end if;
+    end loop;
+exception
+    when undefined_object then
+        raise exception 'cyanaudit: Missing setting for cyanaudit.archive_tablespace. Aborting.';
+end
+ $_$
+    language plpgsql;
+
+    
 CREATE OR REPLACE FUNCTION @extschema@.fn_parse_tgargs
 (
     in_tgargs   BYTEA
@@ -1015,7 +1134,8 @@ begin
        join pg_namespace n
          on c.relnamespace = n.oid
       where n.nspname = 'cyanaudit'
-        and cn.conname = my_constraint_name;
+        and cn.conname = my_constraint_name
+        and c.relname = in_table_name;
 
     if found then
         execute format( 'alter table @extschema@.%I drop constraint %I', 
@@ -1053,14 +1173,23 @@ begin
         raise exception 'Table name must conform to format "tb_audit_event_########_####"';
     end if;
 
-    SET LOCAL client_min_messages to WARNING;
+    perform *
+       from pg_class c
+       join pg_namespace n
+         on c.relnamespace = n.oid
+      where c.relname = in_new_table_name
+        and n.nspname = '@extschema@';
 
-    execute format( 'CREATE TABLE @extschema@.%I '
-                 || '( LIKE @extschema@.tb_audit_event INCLUDING STORAGE INCLUDING INDEXES ) '
-                 || 'INHERITS ( @extschema@.tb_audit_event )',
-                    in_new_table_name );
+    if not found then
+        SET LOCAL client_min_messages to WARNING;
 
-    execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', in_new_table_name );
+        execute format( 'CREATE TABLE @extschema@.%I '
+                     || '( LIKE @extschema@.tb_audit_event INCLUDING STORAGE ) '
+                     || 'INHERITS ( @extschema@.tb_audit_event )',
+                        in_new_table_name );
+
+        execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', in_new_table_name );
+    end if;
 
     return in_new_table_name;
 end
@@ -1079,6 +1208,7 @@ begin
 
     if my_partition_name is null then
         my_partition_name := @extschema@.fn_create_new_partition();
+        perform @extschema@.fn_create_partition_indexes( my_partition_name );
         perform @extschema@.fn_activate_partition( my_partition_name );
         perform @extschema@.fn_setup_partition_range_constraint( my_partition_name );
     end if;
@@ -1089,6 +1219,73 @@ end
     language plpgsql;
 
 
+CREATE OR REPLACE FUNCTION @extschema@.fn_add_all_existing_partitions()
+returns setof varchar as
+ $_$
+declare 
+    my_partition_name   varchar;
+begin
+    SET LOCAL client_min_messages = WARNING;
+
+    for my_partition_name in
+        select c_child.relname
+          from pg_class c_child
+          join pg_namespace n_child
+            on c_child.relnamespace = n_child.oid
+           and n_child.nspname = '@extschema@'
+     left join (     pg_inherits inh
+                join pg_class c_parent
+                  on inh.inhparent = c_parent.oid
+                join pg_namespace n_parent
+                  on c_parent.relnamespace = n_parent.oid
+                 and n_parent.nspname = '@extschema@'
+               )
+            on inh.inhrelid = c_child.oid
+           and c_parent.relname = 'tb_audit_event'
+         where c_parent.oid is null
+           and c_child.relname ~ '^tb_audit_event_\d{8}_\d{4}$'
+    loop
+        -- TODO: Verify check constraints
+        execute format( 'ALTER TABLE @extschema@.%I INHERIT @extschema@.tb_audit_event', my_partition_name );
+        execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', my_partition_name );
+        return next my_partition_name;
+    end loop;
+
+    return;
+end
+ $_$
+    language plpgsql;
+
+
+CREATE OR REPLACE FUNCTION @extschema@.fn_disown_all_partitions()
+returns setof varchar as
+ $_$
+declare
+    my_partition_name   varchar;
+begin
+    for my_partition_name in
+        select c_child.relname
+          from pg_class c_child
+          join pg_namespace n_child
+            on c_child.relnamespace = n_child.oid
+           and n_child.nspname = '@extschema@'
+          join pg_inherits inh
+            on inh.inhrelid = c_child.oid
+          join pg_class c_parent
+            on inh.inhparent = c_parent.oid
+          join pg_namespace n_parent
+            on c_parent.relnamespace = n_parent.oid
+           and n_parent.nspname = '@extschema@'
+           and c_parent.relname = 'tb_audit_event'
+    loop
+        execute format( 'ALTER TABLE @extschema@.%I NO INHERIT @extschema@.tb_audit_event', my_partition_name );
+        execute format( 'ALTER EXTENSION cyanaudit DROP TABLE @extschema@.%I', my_partition_name );
+        return next my_partition_name;
+    end loop;
+    return;
+end
+ $_$
+    language plpgsql;
 
 
 -------- Partition Archiving ---------
@@ -1109,8 +1306,10 @@ begin
                     in_partition_name, my_archive_tablespace );
 
     for my_index_name in
-        select i.indname 
+        select ci.relname 
           from pg_index i
+          join pg_class ci
+            on i.indexrelid = ci.oid
           join pg_class c
             on i.indrelid = c.oid
            and c.relname = in_partition_name
@@ -1156,8 +1355,8 @@ begin
          order by c.relname desc
         offset 1
     loop
-        execute 'alter extension cyanaudit drop table @extschema@.'||quote_ident(my_table_name);
-        execute 'drop table @extschema@.'||quote_ident(my_table_name);
+        execute format( 'ALTER EXTENSION cyanaudit DROP TABLE @extschema@.%I', my_table_name );
+        execute format( 'DROP TABLE @extschema@.%I', my_table_name );
         return next my_table_name;
     end loop;
 
@@ -1223,4 +1422,6 @@ grant  insert,
        update (audit_transaction_type) 
        on @extschema@.tb_audit_event              to public;
 
+
+-- select @extschema@.fn_add_all_existing_partitions();
 

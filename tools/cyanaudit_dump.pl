@@ -1,4 +1,7 @@
 #!/usr/bin/perl -w
+#
+# TODO:
+# - Somehow include number of rows in archive file or its name
 
 use strict;
 
