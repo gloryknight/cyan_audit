@@ -1,7 +1,12 @@
 #!/usr/bin/perl -w
 #
 # TODO:
-# - Somehow include number of rows in archive file or its name
+# - Add header to output format, to hold arbitrary name value pairs. Store:
+#   - Number of rows in output
+#   - Min & max recorded time of all rows
+#   - Min & max txid of all rows
+#   - Version of format
+# - Crash proof backup by opening new file and moving over old file when done
 
 use strict;
 
@@ -56,10 +61,28 @@ foreach my $table_row (@$table_rows)
     
     my $outfile = "$table_name.csv.gz";
 
+    my $latest_recorded_q = "select extract(epoch from max(recorded)) from $schema.$table_name";
+    my ($latest_recorded) = $handle->selectrow_array( $latest_recorded_q );
+
+    unless( $latest_recorded )
+    {
+        print "$table_name: Skipping backup of empty table\n";
+        next;
+    }
+
     if( $outfile ne 'tb_audit_event_current.csv.gz' and md5_verify($outfile) )
     {
-        print "Skipping backup for table $table_name: Valid backup already present.\n";
-        next;
+        my $mtime = get_file_mtime_local( $outfile );
+
+        if( $mtime < $latest_recorded )
+        {
+            print "Backup for $table_name is out of date. Overwriting...\n";
+        }
+        else
+        {
+            print "Backup for $table_name appears to be current. Skipping.\n";
+            next;
+        }
     }
 
     my $exporting_msg = "Exporting $table_name ($table_size_pretty)";

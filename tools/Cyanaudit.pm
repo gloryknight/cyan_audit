@@ -9,6 +9,8 @@ use File::Basename;
 use Exporter;
 use Digest::MD5;
 use Data::Dumper;
+use File::stat;
+use Time::Local;
 
 use vars qw( @ISA @EXPORT );
 
@@ -20,6 +22,7 @@ use vars qw( @ISA @EXPORT );
     md5_verify
     get_cyanaudit_schema
     get_cyanaudit_data_table_list
+    get_file_mtime_local
 );
 
 sub db_connect($)
@@ -92,6 +95,21 @@ sub md5_verify($)
     }
 
     return undef;
+}
+
+sub get_file_mtime_local($)
+{
+    my ($file_path) = @_;
+
+    -f $file_path or return undef;
+    -r $file_path or return undef;
+
+    my $stat_data = stat($file_path);
+    my $mtime = $stat_data->[9];
+
+    my $mtime_local = timegm( localtime($mtime) );
+
+    return $mtime_local;
 }
 
 sub get_cyanaudit_schema($)

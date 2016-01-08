@@ -994,13 +994,14 @@ declare
     my_index_columns    varchar[];
     my_index_column     varchar;
     my_index_name       varchar;
+    my_tablespace       varchar;
 begin
     my_index_columns := array[ 'recorded', 'txid', 'audit_field' ];
 
     foreach my_index_column in array my_index_columns
     loop
         my_index_name := format( 'ix_%s_%s', right( in_table_name, -3 ), my_index_column );
-
+        
         perform *
            from pg_index i
            join pg_class ci
@@ -1014,11 +1015,22 @@ begin
             and ci.relname = my_index_name;
 
         if not found then
+            -- Use tablespace of in_table_name
+            select t.spcname
+              into my_tablespace
+              from pg_class c
+              join pg_tablespace t
+                on c.reltablespace = t.oid
+              join pg_namespace n
+                on c.relnamespace = n.oid
+               and n.nspname = '@extschema@'
+             where c.relname = in_table_name;
+
             execute format( 'CREATE INDEX %I on @extschema@.%I ( %I ) TABLESPACE %I',
                             my_index_name, 
                             in_table_name, 
                             my_index_column, 
-                            current_setting( 'cyanaudit.archive_tablespace' ) );
+                            my_tablespace );
         end if;
     end loop;
 exception
@@ -1180,18 +1192,16 @@ begin
       where c.relname = in_new_table_name
         and n.nspname = '@extschema@';
 
-    if not found then
-        SET LOCAL client_min_messages to WARNING;
-
-        execute format( 'CREATE TABLE @extschema@.%I '
-                     || '( LIKE @extschema@.tb_audit_event INCLUDING STORAGE ) '
-                     || 'INHERITS ( @extschema@.tb_audit_event )',
-                        in_new_table_name );
-
-        execute format( 'ALTER TABLE @extschema@.%I '
-                     || ' ADD FOREIGN KEY( audit_field ) references @extschema@.tb_audit_field ',
-                        in_new_table_name );
+    if found then
+        return null;
     end if;
+
+    SET LOCAL client_min_messages to WARNING;
+
+    execute format( 'CREATE TABLE @extschema@.%I '
+                 || '( LIKE @extschema@.tb_audit_event INCLUDING STORAGE ) '
+                 || 'INHERITS ( @extschema@.tb_audit_event )',
+                    in_new_table_name );
 
     return in_new_table_name;
 end
@@ -1259,7 +1269,6 @@ begin
     loop
         perform @extschema@.fn_prepare_candidate_partition( my_partition_name );
         execute format( 'ALTER TABLE @extschema@.%I INHERIT @extschema@.tb_audit_event', my_partition_name );
-        execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', my_partition_name );
         return next my_partition_name;
     end loop;
 
@@ -1560,16 +1569,16 @@ end
 -- Returns names of tables dropped
 CREATE OR REPLACE FUNCTION @extschema@.fn_prune_archive
 (
-    in_keep_interval    interval
+    in_keep_qty     integer
 )
 returns setof varchar as 
  $_$
 declare
     my_table_name           varchar;
-    my_min_keep_table_name  varchar;
 begin
-    select 'tb_audit_event_' || to_char( now() - in_keep_interval, 'YYYYMMDD_HH24MI' )
-      into my_min_keep_table_name;
+    if in_keep_qty < 0 then
+        raise exception 'in_keep_qty may not be negative.';
+    end if;
 
     for my_table_name in
         select c.relname
@@ -1579,9 +1588,8 @@ begin
            and n.nspname = '@extschema@'
          where c.relkind = 'r'
            and c.relname ~ '^tb_audit_event_\d{8}_\d{4}$'
-           and c.relname < my_min_keep_table_name
          order by c.relname desc
-        offset 1
+        offset in_keep_qty + 1
     loop
         execute format( 'DROP TABLE @extschema@.%I', my_table_name );
         return next my_table_name;

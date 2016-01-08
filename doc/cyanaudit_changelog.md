@@ -1,26 +1,21 @@
 0.9.6 -> 0.9.7
 --------------
-- Added support for logging tables with multi-column PKs
-- Changed table trigger to call generic logging function instead of calling a
-  different (dynamically-created) trigger function for each table.
-- Fixed a bug with cyanaudit_dump.pl where it was not dropping old archive
-  tables as intended, even though -r was specified, and the table was older than
-  the -m value. This happened in the typical case where the table's backup file
-  was already present before the script was run and -c was not specified.
-- Improved cyanaudit_dump.pl to write md5 checksums so that it can determine
-  whether an existing backup file is complete or if it needs to be rewritten.
-- Simplified cyanaudit_dump.pl by removing archival functionality. This
-  functionality is now moved into the function fn_prune_audit_log_archive().
+- Can now log tables with multi-column PKs.
+- Specific trigger function no longer created for each table.  Instead, a
+  generic logging function is called by customized triggers.
+- cyanaudit_{dump/restore}.pl use md5 checksums to validate file integrity.
+- cyanaudit_dump.pl checks currency of output file based on mtime and last
+  recorded timestamp of the partition (log table) being backed up.
+- cyanaudit_dump.pl is no longer responsible for dropping old tables.
+  cyanaudit_log_rotate.pl is now responsible for archiving and dropping tables.
 - Log partition tables are now named according to when they start rather than
   end, and there is no more tb_audit_current (so that it doesn't have to be
   renamed, and can be backed up and restored correctly).
-- Added code to hack in the dependency between trigger and extension, so that
-  dropping the extension now works correctly without "cascade"
-- Made it possible to leave log tables in place when dropping extension, by
-  first running fn_disown_all_partitions() before dropping
-- Added code to check for existing partitions upon install, and automatically
-  set up inheritance to tb_audit_event
-- Lots and lots of code cleanup
+- DROP EXTENSION without CASCADE now silently drops all logging triggers.
+- New fn_disown_all_partitions() keeps log tables from dropping with extension.
+- Add function fn_add_all_floating_partitions() to "assimilate" unassociated
+  partitions that were present at install.
+- Lots and lots of code cleanup.
 
 0.9.5 -> 0.9.6
 --------------

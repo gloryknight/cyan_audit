@@ -168,21 +168,17 @@ my $schema = get_cyanaudit_schema( $handle )
 
 print "Found Cyan Audit in schema '$schema'\n";
 
-my $audit_field_count_q = "select count(*) from $schema.tb_audit_field";
-my ($audit_field_count) = $handle->selectrow_array($audit_field_count_q);
+#my $audit_field_count_q = "select count(*) from $schema.tb_audit_field";
+#my ($audit_field_count) = $handle->selectrow_array($audit_field_count_q);
+#
+#( $audit_field_count > 0 )
+#    or die "Please run fn_update_audit_fields() before attempting to restore.\n";
 
-( $audit_field_count > 0 )
-    or die "Please run fn_update_audit_fields() before attempting to restore.\n";
-
-my $tablespace_q    = "SELECT current_setting('cyanaudit.archive_tablespace')";
-my ($tablespace)    = $handle->selectrow_array($tablespace_q)
-    or die( "Could not determine archive tablespace\n" );
-
-print "Using tablespace $tablespace\n";
+$handle->do( "SELECT $schema.fn_verify_partition_config()" );
 
 foreach my $file( @ARGV )
 {
-    print "$file: Processing...\n";
+    print "$file: ";
 
     open( my $fh, "gunzip -c $file |" ) or die "Could not open $file: $!\n";
 
@@ -210,7 +206,17 @@ foreach my $file( @ARGV )
 
     $handle->do( "BEGIN" );
 
-    $handle->do( "SELECT $schema.fn_create_new_partition( '$table_name' )" ) or die;
+    my $create_q = "SELECT $schema.fn_create_new_partition( '$table_name' )";
+    my ($table_name_check) = $handle->selectrow_array( $create_q ) or die;
+
+    $handle->do( "SELECT $schema.fn_archive_partition( '$table_name' )" ) or die;
+
+    unless( $table_name_check )
+    {
+        print "Table already exists, skipping.\n";
+        $handle->do("ROLLBACK");
+        next;
+    }
 
     my $copy_q = <<SQL;
         COPY $schema.$table_name
@@ -256,7 +262,7 @@ SQL
 
     if( $csv->row == 1 )
     {
-        print "$table_name: No data to restore.\n";
+        print "No data to restore.\n";
         $handle->do("ROLLBACK");
         next;
     }
