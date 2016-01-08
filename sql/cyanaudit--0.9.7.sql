@@ -1188,7 +1188,9 @@ begin
                      || 'INHERITS ( @extschema@.tb_audit_event )',
                         in_new_table_name );
 
-        execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', in_new_table_name );
+        execute format( 'ALTER TABLE @extschema@.%I '
+                     || ' ADD FOREIGN KEY( audit_field ) references @extschema@.tb_audit_field ',
+                        in_new_table_name );
     end if;
 
     return in_new_table_name;
@@ -1219,7 +1221,32 @@ end
     language plpgsql;
 
 
-CREATE OR REPLACE FUNCTION @extschema@.fn_add_all_existing_partitions()
+-- fn_get_all_floating_partitions
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_all_floating_partitions()
+returns setof varchar as
+ $_$
+    select c_child.relname::varchar
+      from pg_class c_child
+      join pg_namespace n_child
+        on c_child.relnamespace = n_child.oid
+       and n_child.nspname = '@extschema@'
+ left join (     pg_inherits inh
+            join pg_class c_parent
+              on inh.inhparent = c_parent.oid
+            join pg_namespace n_parent
+              on c_parent.relnamespace = n_parent.oid
+             and n_parent.nspname = '@extschema@'
+           )
+        on inh.inhrelid = c_child.oid
+       and c_parent.relname = 'tb_audit_event'
+     where c_parent.oid is null
+       and c_child.relname ~ '^tb_audit_event_\d{8}_\d{4}$';
+ $_$
+    language sql;
+    
+
+-- fn_add_all_floating_partitions
+CREATE OR REPLACE FUNCTION @extschema@.fn_add_all_floating_partitions()
 returns setof varchar as
  $_$
 declare 
@@ -1228,24 +1255,9 @@ begin
     SET LOCAL client_min_messages = WARNING;
 
     for my_partition_name in
-        select c_child.relname
-          from pg_class c_child
-          join pg_namespace n_child
-            on c_child.relnamespace = n_child.oid
-           and n_child.nspname = '@extschema@'
-     left join (     pg_inherits inh
-                join pg_class c_parent
-                  on inh.inhparent = c_parent.oid
-                join pg_namespace n_parent
-                  on c_parent.relnamespace = n_parent.oid
-                 and n_parent.nspname = '@extschema@'
-               )
-            on inh.inhrelid = c_child.oid
-           and c_parent.relname = 'tb_audit_event'
-         where c_parent.oid is null
-           and c_child.relname ~ '^tb_audit_event_\d{8}_\d{4}$'
+        select @extschema@.fn_get_all_floating_partitions()
     loop
-        -- TODO: Verify check constraints
+        perform @extschema@.fn_prepare_candidate_partition( my_partition_name );
         execute format( 'ALTER TABLE @extschema@.%I INHERIT @extschema@.tb_audit_event', my_partition_name );
         execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', my_partition_name );
         return next my_partition_name;
@@ -1257,12 +1269,189 @@ end
     language plpgsql;
 
 
+-- fn_prepare_candidate_partition
+CREATE OR REPLACE FUNCTION @extschema@.fn_prepare_candidate_partition
+(
+    in_table_name   varchar
+)
+returns void as
+ $_$
+declare
+    my_existing_constraint      varchar;
+    my_new_condef           varchar;
+    my_column_name          varchar[];
+begin
+    if in_table_name not in (select @extschema@.fn_get_all_floating_partitions()) then
+        raise exception 'Table % cannot inherit tb_audit_event: Must appear in output of fn_get_all_floating_partitions()', in_table_name;
+    end if;
+
+    for my_existing_constraint in
+        select cn.conname
+          from pg_constraint cn
+          join pg_class c
+            on cn.conrelid = c.oid
+          join pg_namespace n
+            on c.relnamespace = n.oid
+         where n.nspname = '@extschema@'
+           and c.relname = in_table_name
+           and cn.contype in ('c','f')
+    loop
+        execute format( 'ALTER TABLE @extschema@.%I DROP CONSTRAINT %I', 
+                        in_table_name, my_existing_constraint );
+    end loop;
+
+    for my_new_condef in
+        select format( 'ALTER TABLE @extschema@.%I ADD CONSTRAINT %I %s',
+                       in_table_name,
+                       cn.conname,
+                       pg_get_constraintdef( cn.oid ) )
+          from pg_constraint cn
+          join pg_class c
+            on cn.conrelid = c.oid
+          join pg_namespace n
+            on c.relnamespace = n.oid
+         where n.nspname = '@extschema@'
+           and c.relname = 'tb_audit_event'
+           and cn.contype in ('c')
+    loop
+        execute my_new_condef;
+    end loop;
+
+    perform @extschema@.fn_setup_partition_range_constraint( in_table_name );
+
+    perform *
+       from pg_attribute a
+       join pg_class c
+         on a.attrelid = c.oid
+       join pg_namespace n
+         on c.relnamespace = n.oid
+      where n.nspname = '@extschema@'
+        and c.relname = in_table_name
+        and a.attname = 'row_pk_val'
+        and not a.attisdropped;
+
+    if found then
+        execute format( 'ALTER TABLE @extschema@.%I ALTER COLUMN row_pk_val RENAME TO pk_vals',
+                        in_table_name );
+        execute format( 'ALTER TABLE @extschema@.%I '
+                     || ' ALTER COLUMN pk_vals type varchar[] using array[pk_vals]::varchar[]',
+                        in_table_name );
+    end if;
+
+    perform @extschema@.fn_remap_audit_fields_from_backup( in_table_name );
+
+    execute format( 'ALTER TABLE @extschema@.%I '
+                 || ' ADD FOREIGN KEY( audit_field ) references @extschema@.tb_audit_field',
+                    in_table_name );
+end
+ $_$
+    language plpgsql strict;
+
+
+
+-- fn_create_tb_audit_field_backup
+CREATE OR REPLACE FUNCTION @extschema@.fn_create_tb_audit_field_backup()
+returns void as
+ $_$
+begin
+    perform *
+       from pg_class c
+       join pg_namespace n
+         on c.relnamespace = n.oid
+      where n.nspname = '@extschema@'
+        and c.relname = 'tb_audit_field_backup';
+
+    if not found then
+        create table @extschema@.tb_audit_field_backup
+        (
+            audit_field     integer primary key,
+            table_schema    varchar not null,
+            table_name      varchar not null,
+            column_name     varchar not null
+        );
+    end if;
+
+    insert into @extschema@.tb_audit_field_backup
+    select af.audit_field,
+           af.table_schema,
+           af.table_name,
+           af.column_name
+      from @extschema@.tb_audit_field af
+ left join @extschema@.tb_audit_field_backup afb
+        on af.audit_field = afb.audit_field
+     where afb.audit_field is null;
+end
+ $_$
+    language plpgsql;
+
+
+
+-- fn_remap_audit_fields_from_backup
+CREATE OR REPLACE FUNCTION @extschema@.fn_remap_audit_fields_from_backup
+(
+    in_partition_name   varchar
+)
+returns void as
+ $_$
+begin
+    -- Use the same PK for as many entries as possible, 
+    -- to avoid unnecessary time-consuming updates later.
+    insert into @extschema@.tb_audit_field
+    (
+        audit_field,
+        table_schema,
+        table_name,
+        column_name
+    )
+    select afb.audit_field,
+           afb.table_schema,
+           afb.table_name,
+           afb.column_name
+      from @extschema@.tb_audit_field_backup afb
+ left join @extschema@.tb_audit_field af
+        on afb.audit_field = af.audit_field
+     where af.audit_field is null;
+
+    create temp table tt_audit_field_map as
+    with tt_audit_field_map as
+    (
+        select afb.audit_field,
+               @extschema@.fn_get_or_create_audit_field
+               (
+                    afb.table_schema,
+                    afb.table_name,
+                    afb.column_name
+               ) as new_audit_field
+          from @extschema@.tb_audit_field_backup afb
+    )
+    select *
+      from tt_audit_field_map
+     where audit_field != new_audit_field;
+
+    execute format( 'UPDATE @extschema@.%I part '
+                 || '   SET audit_field = afm.new_audit_field '
+                 || '  FROM tt_audit_field_map afm '
+                 || ' WHERE afm.audit_field = part.audit_field ',
+                    in_partition_name );
+
+    drop table tt_audit_field_map;
+end
+ $_$
+    language plpgsql;
+
+
+
+
+-- fn_disown_all_partitions
 CREATE OR REPLACE FUNCTION @extschema@.fn_disown_all_partitions()
 returns setof varchar as
  $_$
 declare
     my_partition_name   varchar;
+    my_fk_constraint    varchar;
 begin
+    perform @extschema@.fn_create_tb_audit_field_backup();
+
     for my_partition_name in
         select c_child.relname
           from pg_class c_child
@@ -1278,8 +1467,47 @@ begin
            and n_parent.nspname = '@extschema@'
            and c_parent.relname = 'tb_audit_event'
     loop
+        perform *
+           from pg_attribute a
+           join pg_class c
+             on a.attrelid = c.oid
+           join pg_namespace n
+             on c.relnamespace = n.oid
+          where n.nspname = '@extschema@'
+            and c.relname = my_partition_name
+            and a.attname = 'audit_event'
+            and not attisdropped;
+
+        if found then
+            execute format( 'ALTER TABLE @extschema@.%I ALTER COLUMN audit_event DROP NOT NULL', my_partition_name );
+            execute format( 'ALTER TABLE @extschema@.%I ALTER COLUMN audit_event DROP DEFAULT', my_partition_name );
+        end if;
+
+        for my_fk_constraint in
+            select cn.conname
+              from pg_constraint cn
+              join pg_class c
+                on cn.conrelid = c.oid
+               and c.relname = my_partition_name
+              join pg_namespace n
+                on c.relnamespace = n.oid
+               and n.nspname = '@extschema@'
+              join pg_class cf
+                on cn.confrelid = cf.oid
+               and cf.relname = 'tb_audit_field'
+              join pg_namespace nf
+                on cf.relnamespace = nf.oid
+               and n.nspname = '@extschema@'
+             where cn.contype = 'f'
+        loop
+            execute format( 'ALTER TABLE @extschema@.%I DROP CONSTRAINT %I', my_partition_name, my_fk_constraint );
+        end loop;
+
+        execute format( 'ALTER TABLE @extschema@.%I '
+                     || '  ADD FOREIGN KEY (audit_field) '
+                     || '  REFERENCES @extschema@.tb_audit_field_backup ',
+                        my_partition_name );
         execute format( 'ALTER TABLE @extschema@.%I NO INHERIT @extschema@.tb_audit_event', my_partition_name );
-        execute format( 'ALTER EXTENSION cyanaudit DROP TABLE @extschema@.%I', my_partition_name );
         return next my_partition_name;
     end loop;
     return;
@@ -1355,7 +1583,6 @@ begin
          order by c.relname desc
         offset 1
     loop
-        execute format( 'ALTER EXTENSION cyanaudit DROP TABLE @extschema@.%I', my_table_name );
         execute format( 'DROP TABLE @extschema@.%I', my_table_name );
         return next my_table_name;
     end loop;
@@ -1423,5 +1650,5 @@ grant  insert,
        on @extschema@.tb_audit_event              to public;
 
 
--- select @extschema@.fn_add_all_existing_partitions();
+-- select @extschema@.fn_add_all_floating_partitions();
 

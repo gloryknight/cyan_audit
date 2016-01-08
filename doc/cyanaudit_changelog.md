@@ -14,6 +14,12 @@
 - Log partition tables are now named according to when they start rather than
   end, and there is no more tb_audit_current (so that it doesn't have to be
   renamed, and can be backed up and restored correctly).
+- Added code to hack in the dependency between trigger and extension, so that
+  dropping the extension now works correctly without "cascade"
+- Made it possible to leave log tables in place when dropping extension, by
+  first running fn_disown_all_partitions() before dropping
+- Added code to check for existing partitions upon install, and automatically
+  set up inheritance to tb_audit_event
 - Lots and lots of code cleanup
 
 0.9.5 -> 0.9.6
