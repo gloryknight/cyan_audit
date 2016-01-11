@@ -15,6 +15,9 @@ $| = 1;
 use DBI;
 use Getopt::Std;
 use Encode qw(encode);
+use File::Basename;
+
+use lib dirname(__FILE__);
 
 use Cyanaudit;
 
