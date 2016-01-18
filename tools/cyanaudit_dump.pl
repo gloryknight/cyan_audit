@@ -7,6 +7,8 @@
 #   - Min & max txid of all rows
 #   - Version of format
 # - Crash proof backup by opening new file and moving over old file when done
+# - Automatically install and remove compatibility layer functions pk_vals() and
+#   table_schema() iff needed.
 
 use strict;
 
@@ -54,8 +56,20 @@ my $schema = get_cyanaudit_schema($handle)
 
 print "Found Cyan Audit in schema '$schema'.\n";
 
+my $tables_q = <<SQL;
+    select c.relname as table_name,
+           pg_size_pretty(pg_total_relation_size(c.oid)) as table_size_pretty
+      from pg_class c
+      join pg_namespace n
+        on c.relnamespace = n.oid
+     where c.relkind = 'r'
+       and n.nspname = '$schema'
+       and c.relname ~ '^tb_audit_event_\\d{8}_\\d{4}\$'
+     order by 1 desc
+SQL
+
 # Returns arrayref of hashrefs, each hash containing keys 'table_name' and 'table_size_pretty'
-my $table_rows = get_cyanaudit_data_table_list($handle);
+my $table_rows = $handle->selectall_arrayref( $tables_q, { Slice => {} } );
 
 foreach my $table_row (@$table_rows)
 {

@@ -1,7 +1,4 @@
 #!/usr/bin/perl
-# TODO:
-# - Add option for how to behave when partition already exists: skip, replace,
-# append
 
 $|=1;
 
@@ -16,6 +13,8 @@ use Time::HiRes qw( gettimeofday );
 use File::Basename;
 use Parse::CSV;
 use Date::Parse;
+
+use lib dirname(__FILE__);
 
 use Cyanaudit;
 
@@ -34,14 +33,6 @@ sub usage
         . "  -d db      database name\n";
 
     exit 1;
-}
-
-sub is_text_empty($)
-{
-    my $val = @_;
-    return 1 unless( defined $val );
-    return 1 if( length( $val ) == 0 );
-    return 0;
 }
 
 sub microtime()
@@ -71,6 +62,13 @@ sub build_db_row_from_csv_row($$)
 {
     # $csv_row is a row returned from Parse::CSV
     my( $csv_row, $handle ) = @_;
+
+    return undef unless ( $csv_row->{'old_value'} or $csv_row->{'new_value'} );
+
+    if( $csv_row->{'old_value'} and $csv_row->{'new_value'} )
+    {
+        return undef if( $csv_row->{'old_value'} eq $csv_row->{'new_value'} );
+    }
 
     my $schema = get_cyanaudit_schema( $handle );
     
@@ -209,14 +207,14 @@ foreach my $file( @ARGV )
     my $create_q = "SELECT $schema.fn_create_new_partition( '$table_name' )";
     my ($table_name_check) = $handle->selectrow_array( $create_q ) or die;
 
-    $handle->do( "SELECT $schema.fn_archive_partition( '$table_name' )" ) or die;
-
     unless( $table_name_check )
     {
         print "Table already exists, skipping.\n";
         $handle->do("ROLLBACK");
         next;
     }
+
+#    $handle->do( "SELECT $schema.fn_archive_partition( '$table_name' )" ) or die;
 
     my $copy_q = <<SQL;
         COPY $schema.$table_name
@@ -239,12 +237,20 @@ SQL
     my $start_time = microtime();
     my $last_timestamp;
 
+    my %error_rows;
+
     my $lookup_handle = db_connect( \%opts )
         or die "Could not connect to database: $DBI::errstr\n";
 
     while( my $row = $csv->fetch )
     {
         my $db_row = build_db_row_from_csv_row( $row, $lookup_handle );
+
+        unless( $db_row )
+        {
+            $error_rows{$csv->row} = $row;
+            next;
+        }
 
         if( $handle->pg_putcopydata($db_row. "\n") != 1 )
         {
@@ -272,14 +278,15 @@ SQL
         print "\n";
     }
 
-    print "Setting up partition indexes and range constraints...\n" if( DEBUG );
+    print "Setting up partition indexes and constraints...\n" if( DEBUG );
 
     $handle->do("SELECT $schema.fn_create_partition_indexes( '$table_name' )" ) or die;
-    $handle->do("SELECT $schema.fn_setup_partition_range_constraint( '$table_name' )" ) or die;
+    $handle->do("SELECT $schema.fn_setup_partition_constraints( '$table_name' )" ) or die;
 
     $handle->do( "COMMIT" ) or die;
-    my $delta    = ( microtime() - $start_time ) / 60;
-    printf "Processed '$file' in %d minutes\n", $delta;
+    my $delta    = ( microtime() - $start_time );
+    printf "Processed '$file' in %d:%02d minutes, skipping %d bad rows\n", 
+            $delta/60, $delta%60, scalar keys( %error_rows );
 }
 
 print "== DONE ==\nSuccessfully processed " . scalar @ARGV . " files.\n";

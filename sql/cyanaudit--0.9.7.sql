@@ -1,8 +1,6 @@
 /* TODO: 
  - transaction-specific GUC for transaction labels in real-time
- - function to set and unset real-time transaction label
- - fix current_setting calls to all use accessor function that rethrows exception (or not)
- - write function to scan extnamespace for partitions and add them to tb_audit_event
+   (includes function to set and unset real-time transaction label)
 */
    
 ----- INITIAL SETUP -----
@@ -30,7 +28,7 @@ begin
     execute my_command || 'user_table_username_col = '''' ';
     execute my_command || '_audit_transaction_type = '''' ';
     execute my_command || '_uid = -1';
-    execute my_command || '_last_txid = 0';
+    execute my_command || '_last_txid = '''' ';
 end;
  $$;
 
@@ -43,8 +41,27 @@ end;
 
 ----- User/Application Functions ----
 
--- fn_set_audit_uid
-CREATE OR REPLACE FUNCTION @extschema@.fn_set_audit_uid
+-- fn_get_config
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_config
+(
+    in_config_name  varchar
+)
+returns text as
+ $_$
+declare
+    my_config_value text;
+begin
+    return nullif( current_setting( 'cyanaudit.'||in_config_name ), '' );
+exception
+    when others then
+        return null;
+end
+ $_$
+    language plpgsql strict;
+
+    
+-- fn_set_current_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_set_current_uid
 (
     in_uid   integer
 )
@@ -55,40 +72,37 @@ as $_$
  $_$;
 
 
--- fn_get_audit_uid
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid() 
+-- fn_get_current_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_current_uid() 
 returns integer 
 language plpgsql stable
 as $_$
 declare
     my_uid    integer;
 begin
-    my_uid := coalesce( nullif( current_setting('cyanaudit._uid'), '' )::integer, -1 );
+    my_uid := @extschema@.fn_get_config('_uid')::integer;
 
-    if my_uid >= 0 then return my_uid; end if;
+    if my_uid is null or my_uid < 0 then
+        select @extschema@.fn_get_uid_by_username(current_user::varchar)
+          into my_uid;
+    end if;
 
-    select @extschema@.fn_get_audit_uid_by_username(current_user::varchar)
-      into my_uid;
-
-    return @extschema@.fn_set_audit_uid( coalesce( my_uid, 0 ) );
-exception
-    when undefined_object
-    then return @extschema@.fn_set_audit_uid( 0 );
+    return @extschema@.fn_set_current_uid( coalesce( my_uid, 0 ) );
 end
  $_$;
 
 
--- fn_get_last_audit_txid
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_last_audit_txid()
+-- fn_get_last_txid
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_last_txid()
 returns bigint
 language sql stable
 as $_$
-    SELECT (nullif(current_setting('cyanaudit._last_txid'), '0'))::bigint;
+    SELECT (@extschema@.fn_get_config('_last_txid'))::bigint;
  $_$;
 
 
--- fn_label_audit_transaction
-CREATE OR REPLACE FUNCTION @extschema@.fn_label_audit_transaction
+-- fn_label_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_transaction
 (
     in_label    varchar,
     in_txid     bigint default txid_current()
@@ -113,20 +127,20 @@ end
 
 
 
--- fn_label_last_audit_transaction
-CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_audit_transaction
+-- fn_label_last_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_transaction
 (
     in_label    varchar
 )
-returns bigint
-language sql strict
-as $_$
-    select @extschema@.fn_label_audit_transaction
+returns bigint as 
+ $_$
+    select @extschema@.fn_label_transaction
            (
                 in_label, 
-                @extschema@.fn_get_last_audit_txid()
+                @extschema@.fn_get_last_txid()
            );
- $_$;
+ $_$
+    language sql strict;
 
 -- fn_undo_transaction
 CREATE OR REPLACE FUNCTION @extschema@.fn_undo_transaction
@@ -134,32 +148,32 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_undo_transaction
     in_txid   bigint
 )
 returns setof varchar
-language plpgsql strict
 as $_$
 declare
     my_statement    varchar;
 begin
     for my_statement in
         select query 
-          from vw_audit_transaction_statement_inverse
+          from vw_undo_statement
          where txid = in_txid
     loop
         execute my_statement;
         return next my_statement;
     end loop;
 
-    perform @extschema@.fn_label_audit_transaction('Undo transaction');
+    perform @extschema@.fn_label_transaction('Undo transaction');
 
     return;
 end
- $_$;
+ $_$
+    language plpgsql strict;
 
 
 -- fn_undo_last_transaction
 CREATE OR REPLACE FUNCTION @extschema@.fn_undo_last_transaction()
 returns setof varchar as
  $_$
-    select @extschema@.fn_undo_transaction(@extschema@.fn_get_last_audit_txid());
+    select @extschema@.fn_undo_transaction(@extschema@.fn_get_last_txid());
  $_$
     language 'sql';
 
@@ -242,8 +256,8 @@ end;
 
 ---- INTERNAL UTILITY FUNCTIONS ----
 
--- fn_set_last_audit_txid
-CREATE OR REPLACE FUNCTION @extschema@.fn_set_last_audit_txid
+-- fn_set_last_txid
+CREATE OR REPLACE FUNCTION @extschema@.fn_set_last_txid
 (
     bigint default txid_current()
 )
@@ -254,8 +268,8 @@ as $_$
  $_$;
 
 
--- fn_get_email_by_audit_uid
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_email_by_audit_uid
+-- fn_get_email_by_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_email_by_uid
 (
     in_uid  integer
 )
@@ -269,16 +283,16 @@ declare
     my_user_table           varchar;
     my_user_table_email_col varchar;
 begin
-    select current_setting('cyanaudit.user_table'),
-           current_setting('cyanaudit.user_table_uid_col'),
-           current_setting('cyanaudit.user_table_email_col')
+    select @extschema@.fn_get_config('user_table'),
+           @extschema@.fn_get_config('user_table_uid_col'),
+           @extschema@.fn_get_config('user_table_email_col')
       into my_user_table,
            my_user_table_uid_col,
            my_user_table_email_col;
 
-    if my_user_table            = '' OR
-       my_user_table_uid_col    = '' OR
-       my_user_table_email_col  = ''
+    if my_user_table            IS NULL OR
+       my_user_table_uid_col    IS NULL OR
+       my_user_table_email_col  IS NULL
     then
         return null;
     end if;
@@ -292,9 +306,6 @@ begin
 
     return my_email;
 exception
-    when undefined_object then 
-         -- settings are not defined
-         return null;
     when undefined_table then 
          raise notice 'cyanaudit: Invalid user_table setting: ''%''', my_user_table;
          return null;
@@ -306,8 +317,8 @@ end
  $_$;
 
 
--- fn_get_audit_uid_by_username
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid_by_username
+-- fn_get_uid_by_username
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_uid_by_username
 (
     in_username varchar
 )
@@ -321,16 +332,16 @@ declare
     my_user_table               varchar;
     my_user_table_username_col  varchar;
 begin
-    select current_setting('cyanaudit.user_table'),
-           current_setting('cyanaudit.user_table_uid_col'),
-           current_setting('cyanaudit.user_table_username_col')
+    select @extschema@.fn_get_config('user_table'),
+           @extschema@.fn_get_config('user_table_uid_col'),
+           @extschema@.fn_get_config('user_table_username_col')
       into my_user_table,
            my_user_table_uid_col,
            my_user_table_username_col;
 
-    if my_user_table                = '' OR
-       my_user_table_uid_col        = '' OR
-       my_user_table_username_col   = ''
+    if my_user_table                IS NULL OR
+       my_user_table_uid_col        IS NULL OR
+       my_user_table_username_col   IS NULL
     then
         return null;
     end if;
@@ -344,8 +355,6 @@ begin
 
     return my_uid;
 exception
-    when undefined_object then 
-         return null;
     when undefined_table then 
          raise notice 'cyanaudit: Invalid user_table setting: ''%''', my_user_table;
          return null;
@@ -391,6 +400,27 @@ cross join tt_conkey c
         on c.conkey[s.i] = a.attnum
        and c.relid = a.attrelid
  $_$;
+
+
+-- fn_get_where_string
+-- Takes in array of pk_cols and array of values
+-- Returns a correctly quoted string 'pkcol1 = val1 AND pkcol2 = val2' etc.
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_where_string
+(
+    in_pk_cols  varchar[],
+    in_values   varchar[]
+)
+returns text as
+ $_$
+    with tt_names_values as
+    (
+        select unnest( in_pk_cols ) as colname,
+               unnest( in_values )  as value
+    )
+    select string_agg( format( '%I = %L', colname, value ), ' AND ' )
+      from tt_names_values;
+ $_$
+    language sql strict immutable;
 
 
 
@@ -494,11 +524,8 @@ DECLARE
     my_pk_vals              varchar[];
     my_old_value            text;
     my_new_value            text;
+    my_clock_timestamp      timestamp;
 BEGIN
-    my_pk_cols      := TG_ARGV[0]::varchar[];
-    my_audit_fields := TG_ARGV[1]::varchar[];
-    my_column_names := TG_ARGV[2]::varchar[];
-
     if( TG_OP = 'INSERT' ) then
         my_new_row := NEW;
         my_old_row := NEW;
@@ -510,11 +537,17 @@ BEGIN
         my_old_row := OLD;
     end if;
 
-    if current_setting('cyanaudit.enabled') = '0' then
+    if @extschema@.fn_get_config('enabled') = '0' then
         return my_new_row;
     end if;
 
-    perform @extschema@.fn_set_last_audit_txid();
+    my_pk_cols          := TG_ARGV[0]::varchar[];
+    my_audit_fields     := TG_ARGV[1]::varchar[];
+    my_column_names     := TG_ARGV[2]::varchar[];
+
+    my_clock_timestamp  := clock_timestamp(); -- same for all entries from this invocation
+
+    perform @extschema@.fn_set_last_txid();
 
     -- Given:  my_pk_cols::varchar[]           = ARRAY[ 'column foo',bar ]
     -- Result: my_pk_vals_constructor::varchar = 'select ARRAY[ $1."column foo", $1.bar ]::varchar[]'
@@ -526,7 +559,7 @@ BEGIN
     -- my_pk_vals::varchar[] = ARRAY[ 'val1', 'val2' ]
     EXECUTE my_pk_vals_constructor
        into my_pk_vals
-      using my_new_row;
+      using my_new_row; -- To allow undoing updates to pk columns, logged pk_vals are post-update.
 
     FOR my_column_name, my_audit_field in
         select unnest( my_column_names::varchar[] ),
@@ -556,13 +589,14 @@ BEGIN
         END IF;
 
         EXECUTE format( 'INSERT INTO @extschema@.tb_audit_event '
-                     || '( audit_field, pk_vals, uid, row_op, old_value, new_value ) '
-                     || 'VALUES(  $1, $2, $3, $4::char(1), $5, $6 ) ',
+                     || '( audit_field, recorded, pk_vals, uid, row_op, old_value, new_value ) '
+                     || 'VALUES(  $1, $2, $3, $4, $5::char(1), $6, $7 ) ',
                         my_column_name
                       )
           USING my_audit_field, 
+                my_clock_timestamp,
                 my_pk_vals,
-                @extschema@.fn_get_audit_uid(),
+                @extschema@.fn_get_current_uid(),
                 TG_OP,
                 my_old_value,
                 my_new_value;
@@ -575,9 +609,6 @@ EXCEPTION
          return NEW;
     WHEN undefined_column THEN
          raise notice 'cyanaudit: Attempt to log deleted column. Please run fn_update_audit_fields() as superuser.';
-         return NEW;
-    WHEN undefined_object THEN
-         raise notice 'cyanaudit: Invalid global configuration. Logging disabled.';
          return NEW;
 END
 $_$;
@@ -636,8 +667,6 @@ SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_transaction_
 
 
 -- tb_audit_event
-CREATE SEQUENCE @extschema@.sq_pk_audit_event MAXVALUE 2147483647 CYCLE;
-
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
 (
     audit_field             integer not null references @extschema@.tb_audit_field,
@@ -666,7 +695,7 @@ ALTER TABLE @extschema@.tb_audit_event
 CREATE OR REPLACE VIEW @extschema@.vw_audit_log as
    select ae.recorded, 
           ae.uid, 
-          @extschema@.fn_get_email_by_audit_uid(ae.uid) as user_email,
+          @extschema@.fn_get_email_by_uid(ae.uid) as user_email,
           ae.txid, 
           att.label as description,
           case when af.table_schema = any(current_schemas(true))
@@ -684,78 +713,84 @@ left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type
  order by ae.recorded desc, af.table_name, af.column_name;
 
 -- vw_audit_transaction_statement
+-- This is a deprecated view because it is not accurate for updates to pk columns
+/*
 CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
    select ae.txid, 
-          ae.recorded,
-          @extschema@.fn_get_email_by_audit_uid(ae.uid) as user_email,
-          att.label as description, 
           (case ae.row_op
-          when 'I' then
-               'INSERT INTO ' || af.table_schema || '.' || af.table_name || ' ('
-               || array_to_string(array_agg('"'||af.column_name||'"'), ',') 
-               || ') VALUES ('
-               || array_to_string(array_agg(coalesce(
-                    quote_literal(ae.new_value), 'NULL'
-                  )), ',') ||');'
+           when 'I' then
+                format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
+                        af.table_schema,
+                        af.table_name,
+                        string_agg( quote_ident( af.column_name ), ',' ),
+                        string_agg( quote_nullable( ae.new_value ), ',' )
+                      )
           when 'U' then
-               'UPDATE ' || af.table_schema || '.' || af.table_name || ' SET '
-               || array_to_string(array_agg(af.column_name||' = '||coalesce(
-                    quote_literal(ae.new_value), 'NULL'
-                  )), ', ') 
-               || ' WHERE ' 
-               || quote_literal(fn_get_table_pk_cols(af.table_name, af.table_schema)) || ' = ' 
-               || quote_literal(ae.pk_vals) || ';'
+                format( 'UPDATE %I.%I SET %s WHERE %s;',
+                        af.table_schema,
+                        af.table_name,
+                        string_agg( format( '%I = %L', af.column_name, ae.new_value ), ',' ),
+                        @extschema@.fn_get_where_string(
+                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
+                            ae.pk_vals
+                        )
+                      )
           when 'D' then
-               'DELETE FROM ' || af.table_schema || '.' || af.table_name 
-               || ' WHERE ' 
-               || quote_literal(fn_get_table_pk_cols(af.table_name, af.table_schema)) || ' = ' 
-               || quote_literal(ae.pk_vals) || ';'
+                format( 'DELETE FROM %I.%I WHERE %s;',
+                        af.table_schema,
+                        af.table_name,
+                        @extschema@.fn_get_where_string(
+                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
+                            ae.pk_vals
+                        )
+                      )
           end)::varchar as query
      from @extschema@.tb_audit_event ae
      join @extschema@.tb_audit_field af using(audit_field)
 left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
  group by af.table_schema, af.table_name, ae.row_op, 
           ae.pk_vals, ae.txid, ae.recorded, att.label, 
-          @extschema@.fn_get_email_by_audit_uid(ae.uid),
+          @extschema@.fn_get_email_by_uid(ae.uid),
           @extschema@.fn_get_table_pk_cols(af.table_name, af.table_schema)
  order by ae.recorded;
+*/
 
 
--- vw_audit_transaction_statement_inverse
-CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement_inverse AS
+-- vw_undo_statement
+CREATE OR REPLACE VIEW @extschema@.vw_undo_statement AS
    select ae.txid,
           (case ae.row_op
            when 'D' then 
-                'INSERT INTO ' || af.table_schema || '.' || af.table_name || ' ('
-                || array_to_string(
-                     array_agg('"'||af.column_name||'"'),
-                   ',') || ') values ('
-                || array_to_string(
-                     array_agg(coalesce(
-                         quote_literal(ae.old_value), 'NULL'
-                     )),
-                   ',') ||')'
+                format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
+                        af.table_schema,
+                        af.table_name,
+                        string_agg( quote_ident( af.column_name ), ',' ),
+                        string_agg( quote_nullable( ae.old_value ), ',' )
+                      )
           when 'U' then
-               'UPDATE ' || af.table_schema || '.' || af.table_name || ' set '
-               || array_to_string(array_agg(
-                    af.column_name||' = '|| coalesce(
-                        quote_literal(ae.old_value), 'NULL'
-                    )
-                  ), ', ')
-               || ' WHERE ' 
-               || quote_literal(fn_get_table_pk_cols(af.table_name, af.table_schema)) || ' = ' 
-               || quote_literal(ae.pk_vals) || ';'
+                format( 'UPDATE %I.%I SET %s WHERE %s;',
+                        af.table_schema,
+                        af.table_name,
+                        string_agg( format( '%I = %L', af.column_name, ae.old_value ), ',' ),
+                        @extschema@.fn_get_where_string(
+                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
+                            ae.pk_vals
+                        )
+                      )
           when 'I' then
-               'DELETE FROM ' || af.table_schema || '.' || af.table_name
-               || ' WHERE ' 
-               || quote_literal(fn_get_table_pk_cols(af.table_name, af.table_schema)) || ' = ' 
-               || quote_literal(ae.pk_vals) || ';'
+                format( 'DELETE FROM %I.%I WHERE %s;',
+                        af.table_schema,
+                        af.table_name,
+                        @extschema@.fn_get_where_string(
+                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
+                            ae.pk_vals
+                        )
+                      )
           end)::varchar as query
      from @extschema@.tb_audit_event ae
      join @extschema@.tb_audit_field af using(audit_field)
  group by af.table_schema, af.table_name, ae.row_op, 
-          ae.pk_vals, ae.recorded, ae.txid,
-          @extschema@.fn_get_table_pk_cols(af.table_name, af.table_schema)
+          ae.pk_vals, ae.recorded, ae.txid
  order by ae.recorded desc;
 
 
@@ -902,8 +937,6 @@ begin
 end
  $_$;
 
--- Function to install the event trigger explicitly after pg_restore completes,
--- because we don't want it firing during pg_restore.
 CREATE TRIGGER tr_after_audit_field_change
     AFTER INSERT OR UPDATE on @extschema@.tb_audit_field
     FOR EACH ROW EXECUTE PROCEDURE @extschema@.fn_after_audit_field_change();
@@ -982,65 +1015,74 @@ returns void as
     language sql;
 
 
+
+-- EVENT TRIGGER
+-- fn_update_audit_fields_event_trigger()
+CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger()
+returns event_trigger
+language plpgsql as
+   $function$
+begin
+    perform @extschema@.fn_update_audit_fields();
+exception
+     when insufficient_privilege
+     then return;
+end
+   $function$;
+
+
+
+-- fn_create_event_trigger
+-- Function to install the event trigger explicitly after pg_restore completes,
+-- because we don't want it firing during pg_restore.
+CREATE OR REPLACE FUNCTION @extschema@.fn_create_event_trigger()
+RETURNS void
+LANGUAGE plpgsql
+AS $_$
+begin
+    PERFORM *
+       from pg_event_trigger
+      where evtname = 'tr_update_audit_fields';
+
+    IF NOT FOUND THEN
+        CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end
+            WHEN TAG IN ('ALTER TABLE', 'CREATE TABLE', 'DROP TABLE')
+            EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger();
+
+        ALTER EXTENSION cyanaudit ADD EVENT TRIGGER tr_update_audit_fields;
+    END IF;
+end;
+ $_$;
+
+
+
+
+
+
 --------- Partitioning -----------
 
-CREATE OR REPLACE FUNCTION @extschema@.fn_create_partition_indexes
-(
-    in_table_name   varchar
-)
-returns void as
+-- fn_redirect_audit_events
+-- This trigger function is installed onto tb_audit_event
+CREATE OR REPLACE FUNCTION @extschema@.fn_redirect_audit_events() 
+returns trigger as
  $_$
 declare
-    my_index_columns    varchar[];
-    my_index_column     varchar;
-    my_index_name       varchar;
-    my_tablespace       varchar;
+    my_table_name   varchar;
 begin
-    my_index_columns := array[ 'recorded', 'txid', 'audit_field' ];
+    my_table_name := TG_ARGV[0];
 
-    foreach my_index_column in array my_index_columns
-    loop
-        my_index_name := format( 'ix_%s_%s', right( in_table_name, -3 ), my_index_column );
-        
-        perform *
-           from pg_index i
-           join pg_class ci
-             on i.indexrelid = ci.oid
-           join pg_class c
-             on i.indrelid = c.oid
-           join pg_namespace n
-             on c.relnamespace = n.oid
-          where n.nspname = '@extschema@'
-            and c.relname = in_table_name
-            and ci.relname = my_index_name;
+    execute format( 'insert into @extschema@.%I select $1.*', my_table_name )
+      using NEW;
 
-        if not found then
-            -- Use tablespace of in_table_name
-            select t.spcname
-              into my_tablespace
-              from pg_class c
-              join pg_tablespace t
-                on c.reltablespace = t.oid
-              join pg_namespace n
-                on c.relnamespace = n.oid
-               and n.nspname = '@extschema@'
-             where c.relname = in_table_name;
-
-            execute format( 'CREATE INDEX %I on @extschema@.%I ( %I ) TABLESPACE %I',
-                            my_index_name, 
-                            in_table_name, 
-                            my_index_column, 
-                            my_tablespace );
-        end if;
-    end loop;
-exception
-    when undefined_object then
-        raise exception 'cyanaudit: Missing setting for cyanaudit.archive_tablespace. Aborting.';
+    return null;
 end
  $_$
-    language plpgsql;
+    language 'plpgsql';
 
-    
+
+-- fn_parse_tgargs
+-- This is a handy utility function to get the TGARGS values passed into a
+-- trigger function. Used for validating the active partition name, below
 CREATE OR REPLACE FUNCTION @extschema@.fn_parse_tgargs
 (
     in_tgargs   BYTEA
@@ -1062,23 +1104,7 @@ RETURNS VARCHAR[] AS
     LANGUAGE SQL IMMUTABLE;
 
 
-CREATE OR REPLACE FUNCTION @extschema@.fn_redirect_audit_events() 
-returns trigger as
- $_$
-declare
-    my_table_name   varchar;
-begin
-    my_table_name := TG_ARGV[0];
-
-    execute format( 'insert into @extschema@.%I select $1.*', my_table_name )
-      using NEW;
-
-    return null;
-end
- $_$
-    language 'plpgsql';
-
-
+-- fn_get_active_partition_name
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_active_partition_name()
 returns varchar as
  $_$
@@ -1094,6 +1120,52 @@ returns varchar as
  $_$
     language sql;
 
+
+-- fn_create_new_partition
+CREATE OR REPLACE FUNCTION @extschema@.fn_create_new_partition
+(
+    in_new_table_name varchar default 'tb_audit_event_' || to_char(now(), 'YYYYMMDD_HH24MI')
+)
+returns varchar as
+ $_$
+begin
+    if in_new_table_name is null then
+        raise exception 'in_new_table_name cannot be null';
+    end if;
+
+    if in_new_table_name !~ '^tb_audit_event_\d{8}_\d{4}$' then
+        raise exception 'Table name must conform to format "tb_audit_event_########_####"';
+    end if;
+
+    perform *
+       from pg_class c
+       join pg_namespace n
+         on c.relnamespace = n.oid
+      where c.relname = in_new_table_name
+        and n.nspname = '@extschema@';
+
+    if found then
+        return null;
+    end if;
+
+    SET LOCAL client_min_messages to WARNING;
+
+    execute format( 'CREATE TABLE @extschema@.%I '
+                 || '( '
+                 || '  LIKE @extschema@.tb_audit_event INCLUDING STORAGE '
+                 || ') '
+                 || 'INHERITS ( @extschema@.tb_audit_event )',
+                    in_new_table_name );
+
+    SET LOCAL client_min_messages to NOTICE;
+
+    return in_new_table_name;
+end
+ $_$
+    language plpgsql;
+
+
+-- fn_activate_partition
 CREATE OR REPLACE FUNCTION @extschema@.fn_activate_partition
 (
     in_partition_name   varchar
@@ -1103,6 +1175,10 @@ returns void as
 declare
     my_active_partition_name   varchar;
 begin
+    if in_partition_name is null then
+        raise exception 'in_partition_name cannot be null';
+    end if;
+
     my_active_partition_name := @extschema@.fn_get_active_partition_name();
 
     if my_active_partition_name = in_partition_name then
@@ -1124,7 +1200,67 @@ end
     language plpgsql;
 
 
-CREATE OR REPLACE FUNCTION @extschema@.fn_setup_partition_range_constraint
+-- fn_create_partition_indexes
+CREATE OR REPLACE FUNCTION @extschema@.fn_create_partition_indexes
+(
+    in_table_name   varchar
+)
+returns void as
+ $_$
+declare
+    my_index_columns        varchar[];
+    my_index_column         varchar;
+    my_index_name           varchar;
+    my_tablespace_clause    varchar;
+begin
+    my_index_columns := array[ 'recorded', 'txid', 'audit_field' ];
+
+    foreach my_index_column in array my_index_columns
+    loop
+        my_index_name := format( 'ix_%s_%s', right( in_table_name, -3 ), my_index_column );
+        
+        perform *
+           from pg_index i
+           join pg_class ci
+             on i.indexrelid = ci.oid
+           join pg_class c
+             on i.indrelid = c.oid
+           join pg_namespace n
+             on c.relnamespace = n.oid
+          where n.nspname = '@extschema@'
+            and c.relname = in_table_name
+            and ci.relname = my_index_name;
+
+        if not found then
+            -- Use tablespace of in_table_name
+            select 'TABLESPACE t.spcname'
+              into my_tablespace_clause
+              from pg_class c
+              join pg_tablespace t
+                on c.reltablespace = t.oid
+              join pg_namespace n
+                on c.relnamespace = n.oid
+               and n.nspname = '@extschema@'
+             where c.relname = in_table_name;
+            
+            execute format( 'CREATE INDEX %I on @extschema@.%I ( %I ) %s',
+                            my_index_name, 
+                            in_table_name, 
+                            my_index_column, 
+                            coalesce( my_tablespace_clause, '' )
+                          );
+        end if;
+    end loop;
+exception
+    when undefined_object then
+        raise exception 'cyanaudit: Missing setting for cyanaudit.archive_tablespace. Aborting.';
+end
+ $_$
+    language plpgsql;
+
+    
+-- fn_setup_partition_constraints
+CREATE OR REPLACE FUNCTION @extschema@.fn_setup_partition_constraints
 (
     in_table_name   varchar
 )
@@ -1137,6 +1273,10 @@ declare
     my_max_txid         bigint;
     my_constraint_name  varchar;
 begin
+    if in_table_name is null then
+        raise exception 'Table name cannot be null';
+    end if;
+
     my_constraint_name := 'partition_range_chk';
 
     perform *
@@ -1145,7 +1285,7 @@ begin
          on cn.conrelid = c.oid
        join pg_namespace n
          on c.relnamespace = n.oid
-      where n.nspname = 'cyanaudit'
+      where n.nspname = '@extschema@'
         and cn.conname = my_constraint_name
         and c.relname = in_table_name;
 
@@ -1168,42 +1308,52 @@ begin
                        in_table_name, my_constraint_name,
                        my_min_recorded, my_max_recorded, my_min_txid, my_max_txid );
     end if;
-end
- $_$
-    language plpgsql;
 
-
--- fn_create_new_partition
-CREATE OR REPLACE FUNCTION @extschema@.fn_create_new_partition
-(
-    in_new_table_name varchar default 'tb_audit_event_' || to_char(now(), 'YYYYMMDD_HH24MI')
-)
-returns varchar as
- $_$
-begin
-    if in_new_table_name !~ '^tb_audit_event_\d{8}_\d{4}$' then
-        raise exception 'Table name must conform to format "tb_audit_event_########_####"';
-    end if;
-
+    -- Install FK to tb_audit_field if not present
     perform *
-       from pg_class c
+       from pg_constraint cn
+       join pg_class c
+         on cn.conrelid = c.oid
        join pg_namespace n
          on c.relnamespace = n.oid
-      where c.relname = in_new_table_name
-        and n.nspname = '@extschema@';
+       join pg_class cf
+         on cn.confrelid = cf.oid
+       join pg_namespace nf
+         on cf.relnamespace = nf.oid
+      where n.nspname = '@extschema@'
+        and c.relname = in_table_name
+        and nf.nspname = '@extschema@'
+        and cf.relname = 'tb_audit_field';
 
-    if found then
-        return null;
+    if not found then
+        execute format( 'ALTER TABLE @extschema@.%I '
+                     || '  ADD FOREIGN KEY ( audit_field ) '
+                     || '      references @extschema@.tb_audit_field',
+                        in_table_name );
     end if;
 
-    SET LOCAL client_min_messages to WARNING;
+    -- Install FK to tb_audit_transaction_type if not present
+    perform *
+       from pg_constraint cn
+       join pg_class c
+         on cn.conrelid = c.oid
+       join pg_namespace n
+         on c.relnamespace = n.oid
+       join pg_class cf
+         on cn.confrelid = cf.oid
+       join pg_namespace nf
+         on cf.relnamespace = nf.oid
+      where n.nspname = '@extschema@'
+        and c.relname = in_table_name
+        and nf.nspname = '@extschema@'
+        and cf.relname = 'tb_audit_transaction_type';
 
-    execute format( 'CREATE TABLE @extschema@.%I '
-                 || '( LIKE @extschema@.tb_audit_event INCLUDING STORAGE ) '
-                 || 'INHERITS ( @extschema@.tb_audit_event )',
-                    in_new_table_name );
-
-    return in_new_table_name;
+    if not found then
+        execute format( 'ALTER TABLE @extschema@.%I '
+                     || '  ADD FOREIGN KEY ( audit_transaction_type ) '
+                     || '      references @extschema@.tb_audit_transaction_type',
+                        in_table_name );
+    end if;
 end
  $_$
     language plpgsql;
@@ -1222,7 +1372,7 @@ begin
         my_partition_name := @extschema@.fn_create_new_partition();
         perform @extschema@.fn_create_partition_indexes( my_partition_name );
         perform @extschema@.fn_activate_partition( my_partition_name );
-        perform @extschema@.fn_setup_partition_range_constraint( my_partition_name );
+        perform @extschema@.fn_setup_partition_constraints( my_partition_name );
     end if;
 
     return my_partition_name;
@@ -1230,299 +1380,6 @@ end
  $_$
     language plpgsql;
 
-
--- fn_get_all_floating_partitions
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_all_floating_partitions()
-returns setof varchar as
- $_$
-    select c_child.relname::varchar
-      from pg_class c_child
-      join pg_namespace n_child
-        on c_child.relnamespace = n_child.oid
-       and n_child.nspname = '@extschema@'
- left join (     pg_inherits inh
-            join pg_class c_parent
-              on inh.inhparent = c_parent.oid
-            join pg_namespace n_parent
-              on c_parent.relnamespace = n_parent.oid
-             and n_parent.nspname = '@extschema@'
-           )
-        on inh.inhrelid = c_child.oid
-       and c_parent.relname = 'tb_audit_event'
-     where c_parent.oid is null
-       and c_child.relname ~ '^tb_audit_event_\d{8}_\d{4}$';
- $_$
-    language sql;
-    
-
--- fn_add_all_floating_partitions
-CREATE OR REPLACE FUNCTION @extschema@.fn_add_all_floating_partitions()
-returns setof varchar as
- $_$
-declare 
-    my_partition_name   varchar;
-begin
-    SET LOCAL client_min_messages = WARNING;
-
-    for my_partition_name in
-        select @extschema@.fn_get_all_floating_partitions()
-    loop
-        perform @extschema@.fn_prepare_candidate_partition( my_partition_name );
-        execute format( 'ALTER TABLE @extschema@.%I INHERIT @extschema@.tb_audit_event', my_partition_name );
-        return next my_partition_name;
-    end loop;
-
-    return;
-end
- $_$
-    language plpgsql;
-
-
--- fn_prepare_candidate_partition
-CREATE OR REPLACE FUNCTION @extschema@.fn_prepare_candidate_partition
-(
-    in_table_name   varchar
-)
-returns void as
- $_$
-declare
-    my_existing_constraint      varchar;
-    my_new_condef           varchar;
-    my_column_name          varchar[];
-begin
-    if in_table_name not in (select @extschema@.fn_get_all_floating_partitions()) then
-        raise exception 'Table % cannot inherit tb_audit_event: Must appear in output of fn_get_all_floating_partitions()', in_table_name;
-    end if;
-
-    for my_existing_constraint in
-        select cn.conname
-          from pg_constraint cn
-          join pg_class c
-            on cn.conrelid = c.oid
-          join pg_namespace n
-            on c.relnamespace = n.oid
-         where n.nspname = '@extschema@'
-           and c.relname = in_table_name
-           and cn.contype in ('c','f')
-    loop
-        execute format( 'ALTER TABLE @extschema@.%I DROP CONSTRAINT %I', 
-                        in_table_name, my_existing_constraint );
-    end loop;
-
-    for my_new_condef in
-        select format( 'ALTER TABLE @extschema@.%I ADD CONSTRAINT %I %s',
-                       in_table_name,
-                       cn.conname,
-                       pg_get_constraintdef( cn.oid ) )
-          from pg_constraint cn
-          join pg_class c
-            on cn.conrelid = c.oid
-          join pg_namespace n
-            on c.relnamespace = n.oid
-         where n.nspname = '@extschema@'
-           and c.relname = 'tb_audit_event'
-           and cn.contype in ('c')
-    loop
-        execute my_new_condef;
-    end loop;
-
-    perform @extschema@.fn_setup_partition_range_constraint( in_table_name );
-
-    perform *
-       from pg_attribute a
-       join pg_class c
-         on a.attrelid = c.oid
-       join pg_namespace n
-         on c.relnamespace = n.oid
-      where n.nspname = '@extschema@'
-        and c.relname = in_table_name
-        and a.attname = 'row_pk_val'
-        and not a.attisdropped;
-
-    if found then
-        execute format( 'ALTER TABLE @extschema@.%I ALTER COLUMN row_pk_val RENAME TO pk_vals',
-                        in_table_name );
-        execute format( 'ALTER TABLE @extschema@.%I '
-                     || ' ALTER COLUMN pk_vals type varchar[] using array[pk_vals]::varchar[]',
-                        in_table_name );
-    end if;
-
-    perform @extschema@.fn_remap_audit_fields_from_backup( in_table_name );
-
-    execute format( 'ALTER TABLE @extschema@.%I '
-                 || ' ADD FOREIGN KEY( audit_field ) references @extschema@.tb_audit_field',
-                    in_table_name );
-end
- $_$
-    language plpgsql strict;
-
-
-
--- fn_create_tb_audit_field_backup
-CREATE OR REPLACE FUNCTION @extschema@.fn_create_tb_audit_field_backup()
-returns void as
- $_$
-begin
-    perform *
-       from pg_class c
-       join pg_namespace n
-         on c.relnamespace = n.oid
-      where n.nspname = '@extschema@'
-        and c.relname = 'tb_audit_field_backup';
-
-    if not found then
-        create table @extschema@.tb_audit_field_backup
-        (
-            audit_field     integer primary key,
-            table_schema    varchar not null,
-            table_name      varchar not null,
-            column_name     varchar not null
-        );
-    end if;
-
-    insert into @extschema@.tb_audit_field_backup
-    select af.audit_field,
-           af.table_schema,
-           af.table_name,
-           af.column_name
-      from @extschema@.tb_audit_field af
- left join @extschema@.tb_audit_field_backup afb
-        on af.audit_field = afb.audit_field
-     where afb.audit_field is null;
-end
- $_$
-    language plpgsql;
-
-
-
--- fn_remap_audit_fields_from_backup
-CREATE OR REPLACE FUNCTION @extschema@.fn_remap_audit_fields_from_backup
-(
-    in_partition_name   varchar
-)
-returns void as
- $_$
-begin
-    -- Use the same PK for as many entries as possible, 
-    -- to avoid unnecessary time-consuming updates later.
-    insert into @extschema@.tb_audit_field
-    (
-        audit_field,
-        table_schema,
-        table_name,
-        column_name
-    )
-    select afb.audit_field,
-           afb.table_schema,
-           afb.table_name,
-           afb.column_name
-      from @extschema@.tb_audit_field_backup afb
- left join @extschema@.tb_audit_field af
-        on afb.audit_field = af.audit_field
-     where af.audit_field is null;
-
-    create temp table tt_audit_field_map as
-    with tt_audit_field_map as
-    (
-        select afb.audit_field,
-               @extschema@.fn_get_or_create_audit_field
-               (
-                    afb.table_schema,
-                    afb.table_name,
-                    afb.column_name
-               ) as new_audit_field
-          from @extschema@.tb_audit_field_backup afb
-    )
-    select *
-      from tt_audit_field_map
-     where audit_field != new_audit_field;
-
-    execute format( 'UPDATE @extschema@.%I part '
-                 || '   SET audit_field = afm.new_audit_field '
-                 || '  FROM tt_audit_field_map afm '
-                 || ' WHERE afm.audit_field = part.audit_field ',
-                    in_partition_name );
-
-    drop table tt_audit_field_map;
-end
- $_$
-    language plpgsql;
-
-
-
-
--- fn_disown_all_partitions
-CREATE OR REPLACE FUNCTION @extschema@.fn_disown_all_partitions()
-returns setof varchar as
- $_$
-declare
-    my_partition_name   varchar;
-    my_fk_constraint    varchar;
-begin
-    perform @extschema@.fn_create_tb_audit_field_backup();
-
-    for my_partition_name in
-        select c_child.relname
-          from pg_class c_child
-          join pg_namespace n_child
-            on c_child.relnamespace = n_child.oid
-           and n_child.nspname = '@extschema@'
-          join pg_inherits inh
-            on inh.inhrelid = c_child.oid
-          join pg_class c_parent
-            on inh.inhparent = c_parent.oid
-          join pg_namespace n_parent
-            on c_parent.relnamespace = n_parent.oid
-           and n_parent.nspname = '@extschema@'
-           and c_parent.relname = 'tb_audit_event'
-    loop
-        perform *
-           from pg_attribute a
-           join pg_class c
-             on a.attrelid = c.oid
-           join pg_namespace n
-             on c.relnamespace = n.oid
-          where n.nspname = '@extschema@'
-            and c.relname = my_partition_name
-            and a.attname = 'audit_event'
-            and not attisdropped;
-
-        if found then
-            execute format( 'ALTER TABLE @extschema@.%I ALTER COLUMN audit_event DROP NOT NULL', my_partition_name );
-            execute format( 'ALTER TABLE @extschema@.%I ALTER COLUMN audit_event DROP DEFAULT', my_partition_name );
-        end if;
-
-        for my_fk_constraint in
-            select cn.conname
-              from pg_constraint cn
-              join pg_class c
-                on cn.conrelid = c.oid
-               and c.relname = my_partition_name
-              join pg_namespace n
-                on c.relnamespace = n.oid
-               and n.nspname = '@extschema@'
-              join pg_class cf
-                on cn.confrelid = cf.oid
-               and cf.relname = 'tb_audit_field'
-              join pg_namespace nf
-                on cf.relnamespace = nf.oid
-               and n.nspname = '@extschema@'
-             where cn.contype = 'f'
-        loop
-            execute format( 'ALTER TABLE @extschema@.%I DROP CONSTRAINT %I', my_partition_name, my_fk_constraint );
-        end loop;
-
-        execute format( 'ALTER TABLE @extschema@.%I '
-                     || '  ADD FOREIGN KEY (audit_field) '
-                     || '  REFERENCES @extschema@.tb_audit_field_backup ',
-                        my_partition_name );
-        execute format( 'ALTER TABLE @extschema@.%I NO INHERIT @extschema@.tb_audit_event', my_partition_name );
-        return next my_partition_name;
-    end loop;
-    return;
-end
- $_$
-    language plpgsql;
 
 
 -------- Partition Archiving ---------
@@ -1537,7 +1394,7 @@ declare
     my_archive_tablespace   varchar;
     my_index_name           varchar;
 begin
-    my_archive_tablespace := current_setting( 'cyanaudit.archive_tablespace' );
+    my_archive_tablespace := @extschema@.fn_get_config( 'archive_tablespace' );
 
     execute format( 'alter table @extschema@.%I set tablespace %I',
                     in_partition_name, my_archive_tablespace );
@@ -1600,43 +1457,6 @@ end
  $_$
     language plpgsql strict;
     
-
-
-
--- EVENT TRIGGER
--- fn_update_audit_fields_event_trigger()
-CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields_event_trigger()
-returns event_trigger
-language plpgsql as
-   $function$
-begin
-    perform @extschema@.fn_update_audit_fields();
-exception
-     when insufficient_privilege
-     then return;
-end
-   $function$;
-
-
-
-CREATE OR REPLACE FUNCTION @extschema@.fn_create_event_trigger()
-RETURNS void
-LANGUAGE plpgsql
-AS $_$
-begin
-    PERFORM *
-       from pg_event_trigger
-      where evtname = 'tr_update_audit_fields';
-
-    IF NOT FOUND THEN
-        CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end
-            WHEN TAG IN ('ALTER TABLE', 'CREATE TABLE', 'DROP TABLE')
-            EXECUTE PROCEDURE @extschema@.fn_update_audit_fields_event_trigger();
-
-        ALTER EXTENSION cyanaudit ADD EVENT TRIGGER tr_update_audit_fields;
-    END IF;
-end;
- $_$;
 
 
 

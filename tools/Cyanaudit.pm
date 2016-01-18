@@ -136,24 +136,3 @@ SQL
 
     return $schema;
 }
-
-sub get_cyanaudit_data_table_list($)
-{
-    my( $handle ) = @_;
-
-    my $schema = get_cyanaudit_schema( $handle );
-
-    my $tables_q = <<SQL;
-        select c.relname as table_name,
-               pg_size_pretty(pg_total_relation_size(c.oid)) as table_size_pretty
-          from pg_class c
-          join pg_namespace n
-            on c.relnamespace = n.oid
-         where c.relkind = 'r'
-           and n.nspname = '$schema'
-           and c.relname ~ '^tb_audit_event_(\\d{8}_\\d{4}\$|current)'
-         order by 1
-SQL
-
-    return $handle->selectall_arrayref( $tables_q, { Slice => {} } );
-}

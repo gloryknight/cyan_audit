@@ -7,6 +7,9 @@
 
 # Remember to export your PGHOST, PGUSER, PGDATABASE and PGPORT.
 
+# TODO: Update to use fn_archive_partition() and perl's
+# get_cyanaudit_archive_table_list or similar for initial query
+
 psql -t -A -c "
    select 'alter '
        || case when c.relkind = 'r'

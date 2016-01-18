@@ -7,6 +7,9 @@ $| = 1;
 
 use DBI;
 use Getopt::Std;
+use File::Basename;
+
+use lib dirname(__FILE__);
 
 use Cyanaudit;
 
