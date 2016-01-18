@@ -23,16 +23,13 @@ sql script) with minimal downtime, please follow these directions precisely:
 
 5. Run the new version of cyanaudit_dump.pl AGAIN 
 
-6. As superuser, drop the old extension:
+6. Install the files for the new version of Cyan Audit using `make install` from
+   the base directory of the extracted tar.gz file.
+
+7. As superuser, drop the old extension & schema:
 
     DROP EXTENSION cyanaudit CASCADE;
-
-7. As superuser, drop the old extension's schema (here "cyanaudit"):
-
     DROP SCHEMA cyanaudit CASCADE;
-
-8. Install the files for the new version of Cyan Audit using `make install` from
-   the base directory of the extracted tar.gz file.
 
 9. Install the cyanaudit extension in your database:
     

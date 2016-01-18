@@ -1157,6 +1157,8 @@ begin
                  || 'INHERITS ( @extschema@.tb_audit_event )',
                     in_new_table_name );
 
+    execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', in_new_table_name );
+
     SET LOCAL client_min_messages to NOTICE;
 
     return in_new_table_name;

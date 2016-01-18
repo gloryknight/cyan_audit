@@ -10,12 +10,11 @@
   cyanaudit_log_rotate.pl is now responsible for archiving and dropping tables.
 - Log partition tables are now named according to when they start rather than
   end, and there is no more tb_audit_current (so that it doesn't have to be
-  renamed, and can be backed up and restored correctly).
-- DROP EXTENSION without CASCADE now silently drops all logging triggers.
-- New fn_disown_all_partitions() keeps log tables from dropping with extension.
-- Add function fn_add_all_floating_partitions() to "assimilate" unassociated
-  partitions that were present at install.
-- Lots and lots of code cleanup.
+  renamed upon rotate, and can be backed up and restored correctly).
+- DROP EXTENSION without CASCADE now silently drops all triggers and log tables.
+- CREATE EXTENSION cyanaudit; now does not require schema to be specified.
+  Extension will automatically create and install into the 'cyanaudit' schema.
+- Lots and lots (and lots) of code cleanup.
 
 0.9.5 -> 0.9.6
 --------------
