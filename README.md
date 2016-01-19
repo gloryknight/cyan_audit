@@ -5,6 +5,7 @@ Cyan Audit is a PostgreSQL extension providing comprehensive and
 easily-searchable logs of DML (INSERT/UPDATE/DELETE) activity in your database.
 
 With Cyan Audit you can:
+
 * Log any table with a PK, regardless of schema.
 * Search logs by querying a simple view.
 * Toggle logging on a column-by-column basis using an easy config table.
@@ -17,6 +18,7 @@ With Cyan Audit you can:
 * Save time with a design focused on ease of setup and maintenance.
 
 Cyan Audit:
+
 * is written entirely in SQL and PL/pgSQL (except Perl cron scripts).
 * is Trigger-based.
 * supports PostgreSQL 9.3 and newer.
