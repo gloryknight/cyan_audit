@@ -84,7 +84,7 @@ Set the tablespace to which rotated logs will be moved:
 
     ALTER DATABASE mydb SET cyanaudit.archive_tablespace        = 'big_n_slow';
 
-Force all sessions to reload settings by forcing reconnect (optional):
+Cause all sessions to reload settings by forcing reconnect (optional):
 
     SELECT pg_terminate_backend(pid) 
       FROM pg_stat_activity 
@@ -140,9 +140,6 @@ Cyan Audit's logs are divided (sharded) into partitions, which are created every
 time you run `cyanaudit_log_rotate.pl`. If you ran it at 2016-01-10 09:00, it
 would create a new partition called `cyanaudit.tb_audit_event_20160110_0900`.
 
-Log Maintenance Scripts
------------------------
-
 Cron to rotate logs weekly, dropping archives after 10 weeks.
 
     0 0 * * 0  /usr/pgsql-9.3/bin/cyanaudit_log_rotate.pl -U postgres -d app_db -n 10
@@ -184,16 +181,9 @@ Important Notes
 About
 =====
 
-License
--------
+* Cyan Audit is released under the __PostgreSQL license__. Please see the accompanying
+  LICENSE file for more details.
 
-Cyan Audit is released under the PostgreSQL license. Please see the accompanying
-LICENSE file for more details.
+* Cyan Audit is written and maintained by Moshe Jacobson -- <jehsom@gmail.com>
 
-
-Author
-------
-
-Cyan Audit is written and maintained by Moshe Jacobson -- <moshe@neadwerx.com>
-
-Development sponsored by Nead Werx, Inc. -- <http://www.neadwerx.com>
+* Development sponsored by Nead Werx, Inc. -- <http://www.neadwerx.com>
