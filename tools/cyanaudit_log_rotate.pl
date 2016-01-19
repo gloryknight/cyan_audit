@@ -34,9 +34,9 @@ my %opts;
 
 getopts('U:h:p:d:n:', \%opts) or usage();
 
-if( $opts{'n'} and $opts{'n'} !~ /^\d+$/ )
+unless( $opts{'n'} and $opts{'n'} =~ /^\d+$/ )
 {
-    usage( "-n must specify an integer number of partitions to keep" );
+    usage( "-n is required and must be an integer." );
 }
 
 my $handle = db_connect( \%opts ) or die "Database connect error.\n";

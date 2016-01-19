@@ -1,265 +1,173 @@
 ![Cyan Audit Logo](https://db.tt/IrZ3wQpr)
 
-Synopsis
+Overview
 ========
 
-Cyan Audit is a powerful PostgreSQL extension for in-database logging of DML.
+Where did that unexpected value in the database came from?  Do you have to fix
+your code? Or do you have to fix the user? Which user?
+
+Don't waste time adding logging hooks to your application; Cyan Audit logs every
+INSERT, UPDATE and DELETE, and gives you an easy-to-use view to query the log.
 
 
-Introduction
-============
+Basic Usage
+===========
 
-How do you keep track of who modified the contents of your database?
+Install Cyan Audit:
 
-Most of the time, such logging is implemented in the application layer, meaning
-that every action your application takes has to have extra code just to log the
-action. Therefore, if you forget to add the code to log the action, it will
-never be logged! This is a big headache for the application developer who just
-wants to get the code written.
+    $ su
+    # tar zxvf cyanaudit-X.X.X.tar.gz
+    # cd cyanaudit-X.X.X
+    # make install
+    # psql -U postgres -h /tmp -d app_db
+    app_db# CREATE EXTENSION cyanaudit;
 
-Cyan Audit aims to solve this problem by providing an easy and powerful logging
-system that requires minimal modification to your application and is installed
-easily and cleanly as a PostgreSQL extension.
+Turn on logging for schemas `public` and `app_schema`:
 
-Cyan Audit can selectively log DML on a column-by-column basis, and you can
-select which tables/columns to log by updating a simple config table.
+    app_db# select cyanaudit.fn_update_audit_fields('public');
+    app_db# select cyanaudit.fn_update_audit_fields('app_schema');
 
-You can also turn off logging entirely for just your session if you'd like to
-perform bulk administrative actions without clogging up your log table.
+Search the logs by querying the view `vw_audit_log`:
 
-The contents of the log are available through a view which can be queried easily
-based on recorded timestamp, table/column, userid who performed the action, PK
-value of the affected row, and more.
+    | Column      | Description  
+    |-------------|---------------------------------------------------------------  
+    | recorded    | clock_timestamp of each logged operation.  
+    | uid         | UID of application user, set with SELECT fn_set_audit_uid( uid ). 
+    | user_email  | Derived from uid (see GUC SETTINGS below for configuring).  
+    | txid        | Indexed for easy lookup.  
+    | table_schema| Schema of affected table
+    | table_name  | Affected table
+    | column_name | Column whose values are given in old_value and new_value.
+    | pk_vals[]   | affected row's pk values (after update) cast as varchars.
+    | op          | operation ('I', 'U', or 'D')  
+    | old_value   | NULL on 'I'. Never NULL on 'D'. IS DISTINCT FROM old_value.
+    | new_value   | NULL on 'D'. Never NULL on 'I'. IS DISTINCT FROM new_value.
 
-One of the handiest features, however, is the ability to "undo" a transaction. A
-simple function call will issue the inverse SQL statements of those originally
-executed in the given transaction ID.
+With `\pset format wrapped`, these columns fit comfortably across the screen.
 
-Does that sound interesting? Good, let's get started.
+Toggle logging on a column-by-column basis:
+    
+    UPDATE cyanaudit.tb_audit_field
+       SET enabled = false
+     WHERE table_schema = 'app_schema'
+       AND table_name = 'customers'
+       AND column_name = 'last_modified';
 
+Disable logging for the current session:
 
-Requirements & Limitations
-==========================
+    SET cyanaudit.enabled = 0;
 
-* PostgreSQL 9.3.3 or above is required.
-* Requires language `plpgsql`
+Reverse the DML of your last transaction:
+    
+    SELECT cyanaudit.fn_undo_transaction( cyanaudit.fn_get_last_txid() );
 
-
-Installation
-============
-
-1. Unpack the source files into a directory in your file system:
-
-        # tar zxvf cyanaudit-X.X.X.tar.gz
-
-2. Now go into the directory and simply run `make install`. 
-
-   Note: You will have to have `pg_config` in your path in order for this to
-   work.  You can see if it is in your path by issuing the command `which
-   pg_config`. If it is not found in your search path, you may need to add it by
-   modifying your login script (e.g. .bashrc) to add your `/usr/pgsql-9.3/bin` (or
-   equivalent) directory to your `$PATH`.
-
-3. Log into your database as user `postgres` and create the schema and extension:
-
-        CREATE SCHEMA cyanaudit;
-        CREATE EXTENSION cyanaudit SCHEMA cyanaudit;
-
-4. Configure database-specific settings (optional):
-
-        ALTER DATABASE mydb SET cyanaudit.archive_tablespace = 'big_slow_drive';
-        ALTER DATABASE mydb SET cyanaudit.user_table = 'tb_entity';
-        ALTER DATABASE mydb SET cyanaudit.user_table_uid_col = 'entity';
-        ALTER DATABASE mydb SET cyanaudit.user_table_email_col = 'email_address';
-        ALTER DATABASE mydb SET cyanaudit.user_table_username_col = 'username';
-
-   The `archive_tablespace` setting is the name of the tablespace to which you
-   would like your logs to be archived when they are rotated. This allows you to
-   put your older logs on cheaper, slower media than that of your main database.
-
-   The `user_table`, `user_table_uid_col` and `user_table_email_col` settings
-   allow Cyan Audit to display the userid and email of your users when you view
-   the logs.
-
-   If the `user_table_username_col` is set, Cyan Audit will be able to match a
-   userid from your application to a user in your database cluster. For this to
-   work, your database cluster usernames must match those of your application.
-
-5. Force all sessions to reconnect and pick up the database config settings (optional):
-
-        SELECT pg_terminate_backend(pid) 
-          FROM pg_stat_activity 
-         WHERE pid != pg_backend_pid();
-
-6. Install Cyan Audit logging on all tables in the 'public' schema (repeat for
-   any schemas you'd like to log):
-
-        SELECT cyanaudit.fn_update_audit_fields('public');
-
-   **WARNING**: This function will hold an exclusive lock on all of your tables
-   until the function returns. On a test database with about 2500 columns, this
-   took 20 seconds. Please make sure you run this at a time when it is
-   acceptable for your tables to be locked for up to a minute.
-
-7. Install Cyan Audit event trigger
-
-   This event trigger causes Cyan Audit to re-scan for new and dropped columns
-   whenever any schema changes are made. This will prevent attempts to access
-   dropped columns:
-
-        SELECT cyanaudit.fn_create_event_trigger();
-
-7. (Optional) Add the Cyan Audit schema to your search path:
-
-        ALTER DATABASE mydb SET search_path = public, cyanaudit;
-
-   This will keep you from having to preceed every relation and function in this
-   extension with `cyanaudit.`. The rest of the documentation will assume that
-   Cyan Audit's schema is in the search path.
-
-At this point, logging should be turned on for all supported tables. Perform
-some DML (INSERT, UPDATE, DELETE) and then do `select * from
-cyanaudit.vw_audit_log` and see if your changes have been logged.
+Shorthand for above:
+    
+    SELECT cyanaudit.fn_undo_last_transaction();
 
 
-Configuring Your Application
+
+Optional Configuration Steps
 ============================
 
-Passing the User ID
--------------------
-The only way for Cyan Audit to know the application-level userids of the people
-modifying the database is for your application to convey that information using
-the `fn_set_audit_uid()` function.
+Instruct Cyan Audit on how to populate `vw_audit_log.user_email` given a uid:
 
-This function must be called before any modifications take place, so it is
-normally called immediately after your application obtains a database handle:
+    ALTER DATABASE mydb SET cyanaudit.user_table                = 'users';
+    ALTER DATABASE mydb SET cyanaudit.user_table_uid_col        = 'user_id';
+    ALTER DATABASE mydb SET cyanaudit.user_table_email_col      = 'email_address';
 
-    SELECT fn_set_audit_uid( userid );
+Enable setting uid automatically when `current_user` matches `users.username`: 
 
-Of course, you will need to bind the userid where you see the `userid` parameter
-above.
+    ALTER DATABASE mydb SET cyanaudit.user_table_username_col   = 'username';
 
-The userid you set here will persist for the remainder of the session. If you
-want to un-set it at any point, you can set the userid to -1 or use the `DISCARD
-ALL` SQL command to discard all session-specific settings.
+Set the tablespace to which rotated logs will be moved:
 
-Labeling Transactions
----------------------
-Cyan Audit has the ability to attach textual labels to your transactions, so
-that your application can provide easily understood descriptions of what was
-happening in that transaction, for example to indicate the module of code that
-made the modification, or to allow the layperson to understand the logs a little
-bit more easily.
+    ALTER DATABASE mydb SET cyanaudit.archive_tablespace        = 'big_n_slow';
 
-To use this feature, your application must call
-`fn_last_label_audit_transaction()` immediately after any transaction you wish
-to label:
+Force all sessions to reload settings by forcing reconnect (optional):
 
-    SELECT fn_label_last_audit_transaction('User Logged In');
+    SELECT pg_terminate_backend(pid) 
+      FROM pg_stat_activity 
+     WHERE pid != pg_backend_pid();
 
-This will apply the given label to all log entries associated with the last
-logged transaction.
+Re-scan for schema changes in all tracked schemas:
 
-If you are wanting to label a transaction from within that transaction, e.g. in
-a PL/pgSQL function, you can call the `fn_label_audit_transaction()` function:
+    SELECT cyanaudit.fn_update_audit_fields();
 
-    SELECT fn_label_audit_transaction('User Added');
+Cause Cyan Audit to reflect schema changes automatically:
 
-This will label all actions performed within the current transaction up until
-the point that this function is called. If future modifications are made after
-the function is called, they will not be labeled until the function is caalled
-again.
+    SELECT cyanaudit.fn_create_event_trigger();
 
-The text string you specify here is automatically added to a distinct list of
-labels that can be used over and over without copying the actual text onto each
-transaction, so it is very efficient with disk usage.
+Set up the :logwhere alias by customizing this line & adding to your .psqlrc:
+
+    \set logwhere 'select recorded, uid, user_email, txid, description, table_schema, table_name, column_name, pk_vals, op, old_value, new_value from cyanaudit.vw_audit_log where' 
+
+Use the logwhere alias (previous step) to see all activity from the last 5 minutes:
+    
+    app_db# :logwhere recorded > now() - interval '5 min';
 
 
-Database Objects
-================
 
-Following is a list of Cyan Audit's views, tables and functions of interest to
-the user.
+Application Hooks
+=================
 
-For the sake of simplicity, I will assume for the rest of this document that you
-have added the cyanaudit schema to your search path (See Installation Step 8).
+Attach uid 100042 to all subsequent activity in the current session:
 
+    SELECT cyanaudit.fn_set_audit_uid( 100042 );
 
-Views
------
+Attach description to all prior un-described operations in current transaction:
 
-* `vw_audit_log`
+    SELECT cyanaudit.fn_label_transaction( 'User disabled due to inactivity' );
 
-  This view is the primary interface into the log. It has the following columns:
+Attach description to all un-described operations in the last transaction:
 
-  * `recorded` - timestamp of action. This column is indexed.
-  * `uid` - userid of the user performing the action
-  * `user_email` - email address of user performing the action. 
-  * `txid` - database transaction ID of this operation. This column is indexed.
-  * `description` - Textual description of transaction. See "Labeling
-                    Transactions" above for more information.
-  * `table_name` - Name of table of action. Indexed together with column_name.
-  * `column_name` - Name of column of action. Indexed together with table_name.
-  * `pk_vals` - The PK value(s) of the modified row cast to a varchar[].
-  * `op` - Type of operation ('I', 'U' or 'D' for INSERT, UPDATE or DELETE).
-  * `old_value` - Value of column before DELETE or UPDATE.
-  * `new_value` - Value of column after INSERT or UPDATE.
+    SELECT cyanaudit.fn_label_transaction( 'User enabled', cyanaudit.fn_get_last_txid() );
 
-  It is most efficient to query the audit log based on the indexed columns.
-  Therefore, restricting by `recorded` , `txid` or `table_name` + `column_name`
-  will return results very quickly, whereas using the other columns for your
-  searches will be quite slow unless you have already well restricted the output
-  set using the indexed columns.
+Shorthand for above:
 
-* `vw_audit_transaction_statement`
+    SELECT cyanaudit.fn_label_last_transaction( 'User enabled' );
 
-  This view constructs SQL statements from the data recorded in the log. The
-  reconstructed statements for a transaction are not necessarily the same as the
-  original statements used to effect that transaction's changes, but they
-  produce the same result if executed.
-
-  The view has the following columns:
-
-  * `txid` - Transaction ID. This column is indexed.
-  * `recorded` - When the changes of this statement were originally made
-  * `user_email` - Email of user who made the changes in this transaction
-  * `description` - Textual description of transaction. See "Labeling
-                    Transactions" above for more information.
-  * `query` - The re-constructed query
+Un-set uid and last txid, turn logging back on:
+    
+    DISCARD ALL;
 
 
-Tables
-------
 
-* `tb_audit_field`
+Log Maintenance
+===============
 
-  This table controls the tables & columns that Cyan Audit logs. It is updated
-  automatically whenever you call `fn_update_audit_fields()` (which happens
-  automatically whenever any DDL such as a CREATE TABLE is executed, thanks to
-  the event trigger that you installed during the setup process).
+Cyan Audit's logs are divided (sharded) into partitions, which are created every
+time you run `cyanaudit_log_rotate.pl`. If you ran it at 2016-01-10 09:00, it
+would create a new partition called `cyanaudit.tb_audit_event_20160110_0900`.
 
-  This table has the following columns:
+Log Maintenance Scripts
+-----------------------
 
-  * `audit_field` - This is the PK column of the tb_audit_field table.
-  * `table_schema` - The schema of the table given in table_name.
-  * `table_name` - The table of column given in column_name.
-  * `column_name` - The column being logged
-  * `enabled` (bool) - Set this to true if you wish to log this column.
-  * `loggable` (bool) - true if this column exists and its table has a PK.
+Cron to rotate logs weekly, dropping archives after 10 weeks.
 
-  You can enable or disablelogging for a particular column by updating the
-  `enabled` field. All other fields are read-only.
+    0 0 * * 0  /usr/pgsql-9.3/bin/cyanaudit_log_rotate.pl -U postgres -d app_db -n 10
 
-  For example, this command would disable logging for table 'foo', column 'bar':
+Cron to back up logs nightly (but skips tables already having current backup):
 
-        UPDATE tb_audit_field 
-           SET enabled = false 
-         WHERE table_name = 'foo' 
-           AND column_name = 'bar';
+    5 0 * * *  /usr/pgsql-9.3/bin/cyanaudit_dump.pl -U postgres -d app_db /mnt/backups/cyanaudit/app_db
 
-  When Cyan Audit discovers a new column in your database, it will use the
-  following sensible logic to determine the default value for `enabled`, so as
-  to avoid freaking anyone out:
+Restore all backup files to an existing Cyan Audit installation:
+
+    # /usr/pgsql/9.3/bin/cyanaudit_restore.pl -U postgres -d app_db /mnt/backups/cyanaudit/app_db/*.gz
+
+
+
+Important Notes
+===============
+* Requires PostgreSQL 9.3.3 or above.
+* When querying `vw_audit_log`, specify as many as possible of `table_schema`,
+  `table_name` and `column_name` for fastest results.
+* `fn_update_audit_fields()` will hold an exclusive lock on all of your tables
+  until the function returns. On a test database with about 2500 columns, this
+  took 20 seconds. Please make sure you run this at a time when it is
+  acceptable for your tables to be locked for up to a minute.
+* When Cyan Audit finds a new column (e.g. during `fn_update_audit_fields()`),
+  it will decide the default value for `enabled` as follows:
 
         If any column on same table is enabled, then true.
         Else If we know of fields on this table but all are inactive, then false.
@@ -271,177 +179,6 @@ Tables
                 Else If we know of fields in this database but all are inactive, then false.
                 Else, true
 
-
-Functions
----------
-
-* `fn_label_audit_transaction( label )`
-
-  Please see the section "Labeling Transactions" under "Configuring Your
-  Application" for details on this function.
-
-* `fn_set_audit_uid( uid )`
-
-  Sets the userid for the current session.
-
-  Please see "Passing the User ID" under "Configuring Your Application for more
-  details on this function.
-
-* `fn_get_audit_uid()`
-
-  Returns the userid previously set with `fn_set_audit_uid()`. If none was set,
-  returns 0.
-
-* `fn_get_last_audit_txid()`
-
-  This function returns the txid of the last transaction logged for the current
-  user as indicated by fn_get_audit_uid()
-
-* `fn_undo_transaction( txid )`
-
-  Pass a transaction ID into this function, and it will issue commands to
-  reverse the modifications that were logged for this transaction.
-
-* `fn_undo_last_transaction()`
-  
-  A shortcut for `fn_undo_transaction( fn_get_last_audit_txid() )`
-
-* `fn_update_audit_fields( schema )`
-
-  Scans all tables & columns in the given schema and updates tb_audit_field as
-  appropriate, adding rows for new columns and setting loggable = false for
-  dropped columns. If schema is null, re-scans all schemas currently known to
-  Cyan Audit, and updates tb_audit_field with any changes found.
-
-
-Configuration Parameters
-------------------------
-
-* `cyanaudit.enabled`
-
-  This configuration parameter can be set on a session-by-session basis to
-  disable logging for the current session only:
-
-        SET cyanaudit.enabled = 0;
-
-  Logging can be re-enabled by setting this back to 1 or issuing the `DISCARD
-  ALL` command.
-
-
-Log Maintenance
-===============
-
-Log Storage Overview
---------------------
-
-In order to understand the functionality of the Cyan Audit log maintenance
-scripts, it is first necessary to understand the way the log tables are managed.
-
-When an event is logged, it is inserted into `tb_audit_event`, which is actually
-just an empty parent table. Inheriting this table is another table called
-`tb_audit_event_current`, to which all of the log events are redirected. 
-
-`tb_audit_event_current` lives in your default tablespace, which is usually your
-fastest media, which will not have enough room to let this table grow
-indefinitely. When this table becomes too large, it needs to be re-located into
-your archive tablespace (specified by the confiration parameter
-`cyanaudit.archive_tablespace`), which is usually your larger, slower and
-cheaper media. `cyanaudit_log_rotate.pl` is used to perform this log rotation.
-
-When the current events are rotated into the archive, the table
-`tb_audit_event_current` is renamed to e.g. `tb_audit_event_20131229_0401`,
-where the table name reflects the time the table was rotated. A new
-`tb_audit_event_current` in your default tablespace is then created to receive
-subsequent events.
-
-Under a typical server load, you will want to rotate your audit events on a
-weekly basis. This will eventually create a large number of partitions, one per
-week, dating back as far as you're willing or able to store on your server.
-
-At a certain point, however, you will want to begin deleting old logs to make
-room on your server. The `cyanaudit_dump.pl` script allows you to back up and
-remove logs past a certain age. The backup files are compressed as they are
-created, and they are generally quite small. 
-
-If you want to restore archived logs, for example to do forensics on long lost
-data, or in the case that you've added storage to your server and want to make
-more logs available online, then you can use the `cyanaudit_restore.pl` script
-to import them back from the file into the database.
-
-Below are more detailed descriptions of the three log maintenance scripts, which
-are automatically installed to your PostgreSQL bin/ directory.
-
-
-Log Maintenance Scripts
------------------------
-
-* `cyanaudit_log_rotate.pl`
-
-  This script rotates the current audit events into the archive. It takes only
-  the following parameters, which are optional if the standard PG environment
-  variables are set:
-
-        Usage: cyanaudit_log_rotate.pl [ options ... ]
-        Options:
-          -d db      Connect to given database
-          -h host    Connect to given host
-          -p port    Connect on given port
-          -U user    Connect as given user
-
-  To run this script every Sunday at midnight, you would create the following
-  entry in your crontab (change values and paths as appropriate):
-
-        0 0 * * 0   /usr/pgsql-9.3/bin/cyanaudit_log_rotate.pl -U postgres -d mydb
-
-* `cyanaudit_dump.pl`
-
-  This script has two functions. The first is to export archived logs to files.
-  The second is to remove archived logs older than a certain age from your
-  database.
-
-  Normally you will use both functions simultaneously for the purposes of
-  exporting old logs and removing them from the database. However, it can also
-  be used to back up the logs you have not yet exported, even if you are not
-  ready to delete them. This will allow you to restore these tables in the event
-  of a database crash, since your regular `pg_dump` backups will not catch these
-  tables as they are owned by the extension.
-
-        Usage: cyanaudit_dump.pl -m months_to_keep [ options ... ]
-        Options:
-          -d db      Connect to database by given Name
-          -U user    Connect to database as given User
-          -h host    Connect to database on given Host
-          -p port    Connect to database on given Port
-          -a         Back up All audit tables
-          -c         Clobber (overwrite) existing files. Default is to skip these.
-          -r         Remove table from database once it has been archived
-          -z         gzip output file
-          -o dir     Output directory (default current directory)
-
-  If you'd like to use the script to ensure that all of your tables are backed
-  up into files in `/var/lib/pgsql/backups`, as well as to remove logs over 6
-  months old, you can run it every day with a crontab entry as follows:
-  
-        0 0 * * *   /usr/pgsql-9.3/bin/cyanaudit_dump.pl -U postgres -d mydb -a -r -m 6 -z -o /var/lib/pgsql/backups
-
-  It is highly recommended to use the -z option in all cases, as the output is
-  extremely large if uncompressed, and also compresses quite well.
-
-* `cyanaudit_restore.pl`
-
-  This script takes a file created by `cyanaudit_dump.pl` and restores it back
-  into the database. 
-
-        Usage: cyanaudit_restore.pl [ options ] file [...]
-        Options:
-          -d db      Connect to given database
-          -h host    Connect to given host
-          -p port    Connect on given port
-          -U user    Connect as given user
-
-  Due to the nature of the way the compresed archive files are stored, it is not
-  possible to give a percentage-based progress indicator when restoring from a
-  compressed archive.
 
 
 About
