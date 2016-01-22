@@ -24,6 +24,5 @@ Cyan Audit:
 * supports PostgreSQL 9.3 and newer.
 * has been production tested for 4 years.
 
-For installation instructions and further documentation, please see
-the documentation for the cyanaudit module in doc/cyanaudit.md.
+For installation and usage instructions please see doc/cyanaudit.md.
 

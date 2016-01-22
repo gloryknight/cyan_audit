@@ -35,6 +35,74 @@ end;
 
 
 
+------------------
+----- TABLES -----
+------------------
+
+-- tb_audit_field
+create sequence @extschema@.sq_pk_audit_field;
+
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
+(
+    audit_field     integer primary key default nextval('@extschema@.sq_pk_audit_field'),
+    table_schema    varchar not null default 'public',
+    table_name      varchar not null,
+    column_name     varchar not null,
+    enabled         boolean not null,
+    loggable        boolean not null,
+    CONSTRAINT tb_audit_field_table_column_key 
+        UNIQUE( table_schema, table_name, column_name ),
+    CONSTRAINT tb_audit_field_tb_audit_event_not_allowed 
+        CHECK( table_schema != '@extschema@' )
+);
+
+alter sequence @extschema@.sq_pk_audit_field
+    owned by @extschema@.tb_audit_field.audit_field;
+
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_field','');
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_field','');
+
+
+
+-- tb_audit_transaction_type
+CREATE SEQUENCE @extschema@.sq_pk_audit_transaction_type;
+
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_transaction_type
+(
+    audit_transaction_type  integer primary key
+                            default nextval('@extschema@.sq_pk_audit_transaction_type'),
+    label                   varchar unique
+);
+
+ALTER SEQUENCE sq_pk_audit_transaction_type
+    owned by @extschema@.tb_audit_transaction_type.audit_transaction_type;
+
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_transaction_type','');
+SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_transaction_type','');
+
+
+
+-- tb_audit_event
+CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
+(
+    audit_field             integer not null references @extschema@.tb_audit_field,
+    pk_vals                 varchar[] not null,
+    recorded                timestamp not null default clock_timestamp(),
+    uid                     integer not null,
+    row_op                  char(1) not null,
+    txid                    bigint not null default txid_current(),
+    audit_transaction_type  integer references @extschema@.tb_audit_transaction_type,
+    old_value               text,
+    new_value               text
+);
+
+ALTER TABLE @extschema@.tb_audit_event
+    ADD CONSTRAINT tb_audit_event_consistency_chk
+        CHECK( case row_op when 'I' then old_value is null when 'D' then new_value is null 
+                           when 'U' then old_value is distinct from new_value else false end );
+
+
+
 ------------------------
 ------ FUNCTIONS ------
 ------------------------
@@ -59,7 +127,7 @@ end
  $_$
     language plpgsql strict;
 
-    
+
 -- fn_set_current_uid
 CREATE OR REPLACE FUNCTION @extschema@.fn_set_current_uid
 (
@@ -71,6 +139,18 @@ as $_$
     select (set_config('cyanaudit._uid', in_uid::varchar, false))::integer;
  $_$;
 
+
+-- fn_set_audit_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_set_audit_uid( in_uid integer )
+returns integer as 
+ $_$
+    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
+
+    select @extschema@.fn_set_current_uid( in_uid );
+ $_$
+    language sql;
+
+    
 
 -- fn_get_current_uid
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_current_uid() 
@@ -101,29 +181,70 @@ as $_$
  $_$;
 
 
+-- fn_get_or_create_audit_transaction_type
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_transaction_type
+(
+    in_label    varchar
+)
+returns integer
+language plpgsql strict
+as $_$
+declare
+    my_audit_transaction_type   integer;
+begin
+    select audit_transaction_type
+      into my_audit_transaction_type
+      from @extschema@.tb_audit_transaction_type
+     where label = in_label;
+
+    if not found then
+        insert into @extschema@.tb_audit_transaction_type
+        (
+            label
+        )
+        values
+        (
+            in_label
+        )
+        returning audit_transaction_type
+        into my_audit_transaction_type;
+    end if;
+
+    return my_audit_transaction_type;
+end
+ $_$;
+
+        
 -- fn_label_transaction
 CREATE OR REPLACE FUNCTION @extschema@.fn_label_transaction
 (
     in_label    varchar,
     in_txid     bigint default txid_current()
 )
-returns bigint 
-language plpgsql strict
+returns void 
 as $_$
-declare
-    my_audit_transaction_type   integer;
-begin
-    select @extschema@.fn_get_or_create_audit_transaction_type(in_label)
-      into my_audit_transaction_type;
-
     update @extschema@.tb_audit_event
-       set audit_transaction_type = my_audit_transaction_type
+       set audit_transaction_type = @extschema@.fn_get_or_create_audit_transaction_type( in_label )
      where txid = in_txid
        and audit_transaction_type is null;
+ $_$
+    language sql;
 
-    return in_txid;
-end
- $_$;
+
+
+-- fn_label_audit_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_audit_transaction
+(
+    in_label    varchar,
+    in_txid     bigint default txid_current()
+)
+returns void AS
+ $_$
+    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
+
+    SELECT @extschema@.fn_label_transaction( in_label, in_txid );
+ $_$
+    language sql;
 
 
 
@@ -132,7 +253,7 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_transaction
 (
     in_label    varchar
 )
-returns bigint as 
+returns void as 
  $_$
     select @extschema@.fn_label_transaction
            (
@@ -141,6 +262,24 @@ returns bigint as
            );
  $_$
     language sql strict;
+
+
+-- fn_label_last_audit_transaction
+CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_audit_transaction
+(
+    in_label    varchar
+)
+returns void AS
+ $_$
+    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
+
+    SELECT @extschema@.fn_label_last_transaction( in_label );
+ $_$
+    language sql;
+
+
+
+
 
 -- fn_undo_transaction
 CREATE OR REPLACE FUNCTION @extschema@.fn_undo_transaction
@@ -424,40 +563,6 @@ returns text as
 
 
 
--- fn_get_or_create_audit_transaction_type
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_transaction_type
-(
-    in_label    varchar
-)
-returns integer
-language plpgsql strict
-as $_$
-declare
-    my_audit_transaction_type   integer;
-begin
-    select audit_transaction_type
-      into my_audit_transaction_type
-      from @extschema@.tb_audit_transaction_type
-     where label = in_label;
-
-    if not found then
-        insert into @extschema@.tb_audit_transaction_type
-        (
-            label
-        )
-        values
-        (
-            in_label
-        )
-        returning audit_transaction_type
-        into my_audit_transaction_type;
-    end if;
-
-    return my_audit_transaction_type;
-end
- $_$;
-
-        
 -- fn_get_or_create_audit_field
 CREATE OR REPLACE FUNCTION @extschema@.fn_get_or_create_audit_field
 (
@@ -615,183 +720,6 @@ $_$;
 
 
 
-
-
-
-
-------------------
------ TABLES -----
-------------------
-
--- tb_audit_field
-create sequence @extschema@.sq_pk_audit_field;
-
-CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
-(
-    audit_field     integer primary key default nextval('@extschema@.sq_pk_audit_field'),
-    table_schema    varchar not null default 'public',
-    table_name      varchar not null,
-    column_name     varchar not null,
-    enabled         boolean not null,
-    loggable        boolean not null,
-    CONSTRAINT tb_audit_field_table_column_key 
-        UNIQUE( table_schema, table_name, column_name ),
-    CONSTRAINT tb_audit_field_tb_audit_event_not_allowed 
-        CHECK( table_schema != '@extschema@' )
-);
-
-alter sequence @extschema@.sq_pk_audit_field
-    owned by @extschema@.tb_audit_field.audit_field;
-
-SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_field','');
-SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_field','');
-
-
-
--- tb_audit_transaction_type
-CREATE SEQUENCE @extschema@.sq_pk_audit_transaction_type;
-
-CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_transaction_type
-(
-    audit_transaction_type  integer primary key
-                            default nextval('@extschema@.sq_pk_audit_transaction_type'),
-    label                   varchar unique
-);
-
-ALTER SEQUENCE sq_pk_audit_transaction_type
-    owned by @extschema@.tb_audit_transaction_type.audit_transaction_type;
-
-SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_transaction_type','');
-SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_transaction_type','');
-
-
-
--- tb_audit_event
-CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
-(
-    audit_field             integer not null references @extschema@.tb_audit_field,
-    pk_vals                 varchar[] not null,
-    recorded                timestamp not null default clock_timestamp(),
-    uid                     integer not null,
-    row_op                  char(1) not null,
-    txid                    bigint not null default txid_current(),
-    audit_transaction_type  integer references @extschema@.tb_audit_transaction_type,
-    old_value               text,
-    new_value               text
-);
-
-ALTER TABLE @extschema@.tb_audit_event
-    ADD CONSTRAINT tb_audit_event_consistency_chk
-        CHECK( case row_op when 'I' then old_value is null when 'D' then new_value is null 
-                           when 'U' then old_value is distinct from new_value else false end );
-
-
-
---------------------
------- VIEWS -------
---------------------
-
--- log view
-CREATE OR REPLACE VIEW @extschema@.vw_audit_log as
-   select ae.recorded, 
-          ae.uid, 
-          @extschema@.fn_get_email_by_uid(ae.uid) as user_email,
-          ae.txid, 
-          att.label as description,
-          case when af.table_schema = any(current_schemas(true))
-               then af.table_name
-               else af.table_schema || '.' || af.table_name
-          end as table_name,
-          af.column_name,
-          ae.pk_vals as pk_vals,
-          ae.row_op as op,
-          ae.old_value,
-          ae.new_value
-     from @extschema@.tb_audit_event ae
-     join @extschema@.tb_audit_field af using(audit_field)
-left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
- order by ae.recorded desc, af.table_name, af.column_name;
-
--- vw_audit_transaction_statement
--- This is a deprecated view because it is not accurate for updates to pk columns
-/*
-CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
-   select ae.txid, 
-          (case ae.row_op
-           when 'I' then
-                format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
-                        af.table_schema,
-                        af.table_name,
-                        string_agg( quote_ident( af.column_name ), ',' ),
-                        string_agg( quote_nullable( ae.new_value ), ',' )
-                      )
-          when 'U' then
-                format( 'UPDATE %I.%I SET %s WHERE %s;',
-                        af.table_schema,
-                        af.table_name,
-                        string_agg( format( '%I = %L', af.column_name, ae.new_value ), ',' ),
-                        @extschema@.fn_get_where_string(
-                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
-                            ae.pk_vals
-                        )
-                      )
-          when 'D' then
-                format( 'DELETE FROM %I.%I WHERE %s;',
-                        af.table_schema,
-                        af.table_name,
-                        @extschema@.fn_get_where_string(
-                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
-                            ae.pk_vals
-                        )
-                      )
-          end)::varchar as query
-     from @extschema@.tb_audit_event ae
-     join @extschema@.tb_audit_field af using(audit_field)
-left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
- group by af.table_schema, af.table_name, ae.row_op, 
-          ae.pk_vals, ae.txid, ae.recorded, att.label, 
-          @extschema@.fn_get_email_by_uid(ae.uid),
-          @extschema@.fn_get_table_pk_cols(af.table_name, af.table_schema)
- order by ae.recorded;
-*/
-
-
--- vw_undo_statement
-CREATE OR REPLACE VIEW @extschema@.vw_undo_statement AS
-   select ae.txid,
-          (case ae.row_op
-           when 'D' then 
-                format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
-                        af.table_schema,
-                        af.table_name,
-                        string_agg( quote_ident( af.column_name ), ',' ),
-                        string_agg( quote_nullable( ae.old_value ), ',' )
-                      )
-          when 'U' then
-                format( 'UPDATE %I.%I SET %s WHERE %s;',
-                        af.table_schema,
-                        af.table_name,
-                        string_agg( format( '%I = %L', af.column_name, ae.old_value ), ',' ),
-                        @extschema@.fn_get_where_string(
-                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
-                            ae.pk_vals
-                        )
-                      )
-          when 'I' then
-                format( 'DELETE FROM %I.%I WHERE %s;',
-                        af.table_schema,
-                        af.table_name,
-                        @extschema@.fn_get_where_string(
-                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
-                            ae.pk_vals
-                        )
-                      )
-          end)::varchar as query
-     from @extschema@.tb_audit_event ae
-     join @extschema@.tb_audit_field af using(audit_field)
- group by af.table_schema, af.table_name, ae.row_op, 
-          ae.pk_vals, ae.recorded, ae.txid
- order by ae.recorded desc;
 
 
 
@@ -1458,12 +1386,121 @@ begin
 end
  $_$
     language plpgsql strict;
-    
+
+--------------------
+------ VIEWS -------
+--------------------
+
+-- vw_audit_log
+-- This is the main user interface to the cyanaudit log.
+CREATE OR REPLACE VIEW @extschema@.vw_audit_log as
+   select ae.recorded, 
+          ae.uid, 
+          @extschema@.fn_get_email_by_uid(ae.uid) as user_email,
+          ae.txid, 
+          att.label as description,
+          case when af.table_schema = any(current_schemas(true))
+               then af.table_name
+               else af.table_schema || '.' || af.table_name
+          end as table_name,
+          af.column_name,
+          ae.pk_vals as pk_vals,
+          ae.row_op as op,
+          ae.old_value,
+          ae.new_value
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
+left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
+ order by ae.recorded desc, af.table_name, af.column_name;
+
+
+-- vw_undo_statement
+CREATE OR REPLACE VIEW @extschema@.vw_undo_statement AS
+   select ae.txid,
+          (case ae.row_op
+           when 'D' then 
+                format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
+                        af.table_schema,
+                        af.table_name,
+                        string_agg( quote_ident( af.column_name ), ',' ),
+                        string_agg( quote_nullable( ae.old_value ), ',' )
+                      )
+          when 'U' then
+                format( 'UPDATE %I.%I SET %s WHERE %s;',
+                        af.table_schema,
+                        af.table_name,
+                        string_agg( format( '%I = %L', af.column_name, ae.old_value ), ',' ),
+                        @extschema@.fn_get_where_string(
+                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
+                            ae.pk_vals
+                        )
+                      )
+          when 'I' then
+                format( 'DELETE FROM %I.%I WHERE %s;',
+                        af.table_schema,
+                        af.table_name,
+                        @extschema@.fn_get_where_string(
+                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
+                            ae.pk_vals
+                        )
+                      )
+          end)::varchar as query
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
+ group by af.table_schema, af.table_name, ae.row_op, 
+          ae.pk_vals, ae.recorded, ae.txid
+ order by ae.recorded desc;
 
 
 
 
---- PERMISSIONS
+-- vw_audit_transaction_statement
+-- DEPRECATED. DO NOT USE.
+-- Not accurate for updates to pk columns (WHERE lists new PK, not old)
+CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
+   select ae.txid, 
+          (case ae.row_op
+           when 'I' then
+                format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
+                        af.table_schema,
+                        af.table_name,
+                        string_agg( quote_ident( af.column_name ), ',' ),
+                        string_agg( quote_nullable( ae.new_value ), ',' )
+                      )
+          when 'U' then
+                format( 'UPDATE %I.%I SET %s WHERE %s;',
+                        af.table_schema,
+                        af.table_name,
+                        string_agg( format( '%I = %L', af.column_name, ae.new_value ), ',' ),
+                        @extschema@.fn_get_where_string(
+                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
+                            ae.pk_vals
+                        )
+                      )
+          when 'D' then
+                format( 'DELETE FROM %I.%I WHERE %s;',
+                        af.table_schema,
+                        af.table_name,
+                        @extschema@.fn_get_where_string(
+                            @extschema@.fn_get_table_pk_cols( af.table_name, af.table_schema ),
+                            ae.pk_vals
+                        )
+                      )
+          end)::varchar as query
+     from @extschema@.tb_audit_event ae
+     join @extschema@.tb_audit_field af using(audit_field)
+left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
+ group by af.table_schema, af.table_name, ae.row_op, 
+          ae.pk_vals, ae.txid, ae.recorded, att.label, 
+          @extschema@.fn_get_email_by_uid(ae.uid),
+          @extschema@.fn_get_table_pk_cols(af.table_name, af.table_schema)
+ order by ae.recorded;
+
+
+
+-------------------
+--- PERMISSIONS ---
+-------------------
 
 grant  usage
        on schema @extschema@                      to public;
@@ -1478,7 +1515,3 @@ grant  insert,
        select (audit_transaction_type, txid), 
        update (audit_transaction_type) 
        on @extschema@.tb_audit_event              to public;
-
-
--- select @extschema@.fn_add_all_floating_partitions();
-
