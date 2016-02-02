@@ -55,7 +55,7 @@ my ($table_name) = $handle->selectrow_array( "select $schema.fn_create_new_parti
 print "Created new archive table $schema.$table_name.\n";
 
 print "Finalizing indexes and constraints... ";
-$handle->do( "select $schema.fn_setup_partition_range_constraint( ? )", undef, $table_name );
+$handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $table_name );
 $handle->do( "select $schema.fn_create_partition_indexes( ? )", undef, $table_name );
 $handle->do( "select $schema.fn_activate_partition( ? )", undef, $table_name );
 
