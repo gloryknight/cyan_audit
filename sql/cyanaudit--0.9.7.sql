@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_transaction_type
     label                   varchar unique
 );
 
-ALTER SEQUENCE sq_pk_audit_transaction_type
+ALTER SEQUENCE @extschema@.sq_pk_audit_transaction_type
     owned by @extschema@.tb_audit_transaction_type.audit_transaction_type;
 
 SELECT pg_catalog.pg_extension_config_dump('@extschema@.tb_audit_transaction_type','');
@@ -86,7 +86,7 @@ SELECT pg_catalog.pg_extension_config_dump('@extschema@.sq_pk_audit_transaction_
 CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
 (
     audit_field             integer not null references @extschema@.tb_audit_field,
-    pk_vals                 varchar[] not null,
+    pk_vals                 text[] not null,
     recorded                timestamp not null default clock_timestamp(),
     uid                     integer not null,
     row_op                  char(1) not null,
@@ -293,7 +293,7 @@ declare
 begin
     for my_statement in
         select query 
-          from vw_undo_statement
+          from @extschema@.vw_undo_statement
          where txid = in_txid
     loop
         execute my_statement;
@@ -378,7 +378,7 @@ begin
            and af.loggable is true
     )
     update @extschema@.tb_audit_field af
-       set loggable = false
+       set loggable = false -- trigger will update to actual value
       from tt_audit_fields ttaf
      where af.audit_field = ttaf.audit_field
        and af.loggable
@@ -713,7 +713,7 @@ EXCEPTION
          raise notice 'cyanaudit: Missing internal function. Please reinstall.';
          return NEW;
     WHEN undefined_column THEN
-         raise notice 'cyanaudit: Attempt to log deleted column. Please run fn_update_audit_fields() as superuser.';
+         raise notice 'cyanaudit: Attempt to log deleted column. Please run @extschema@.fn_update_audit_fields() as superuser.';
          return NEW;
 END
 $_$;
@@ -829,7 +829,7 @@ begin
         and tgname = 'tr_log_audit_event';
 
     IF FOUND THEN
-        perform @extschema@.fn_remove_trigger_from_extension( NEW.table_schema, NEW.table_name );
+        -- perform @extschema@.fn_remove_trigger_from_extension( NEW.table_schema, NEW.table_name );
         execute format( 'DROP TRIGGER tr_log_audit_event ON %I.%I',
                         NEW.table_schema, NEW.table_name );
     END IF;
@@ -858,7 +858,7 @@ begin
                         my_audit_fields,
                         my_column_names
                       );
-        perform @extschema@.fn_add_trigger_to_extension( NEW.table_schema, NEW.table_name );
+        -- perform @extschema@.fn_add_trigger_to_extension( NEW.table_schema, NEW.table_name );
     END IF;
 
     return NEW;
@@ -871,6 +871,7 @@ CREATE TRIGGER tr_after_audit_field_change
 
 
 
+/*
 CREATE OR REPLACE FUNCTION @extschema@.fn_add_trigger_to_extension
 (
     in_table_schema varchar,
@@ -941,6 +942,7 @@ returns void as
      WHERE row(d.*) = row(tt.*);
  $_$
     language sql;
+*/
 
 
 
@@ -981,8 +983,6 @@ begin
     END IF;
 end;
  $_$;
-
-
 
 
 
@@ -1399,12 +1399,12 @@ CREATE OR REPLACE VIEW @extschema@.vw_audit_log as
           @extschema@.fn_get_email_by_uid(ae.uid) as user_email,
           ae.txid, 
           att.label as description,
-          case when af.table_schema = any(current_schemas(true))
+          (case when af.table_schema = any(current_schemas(true))
                then af.table_name
                else af.table_schema || '.' || af.table_name
-          end as table_name,
+          end)::varchar as table_name,
           af.column_name,
-          ae.pk_vals as pk_vals,
+          ae.pk_vals::text[] as pk_vals,
           ae.row_op as op,
           ae.old_value,
           ae.new_value
