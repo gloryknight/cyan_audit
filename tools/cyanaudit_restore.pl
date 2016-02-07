@@ -166,12 +166,6 @@ my $schema = get_cyanaudit_schema( $handle )
 
 print "Found Cyan Audit in schema '$schema'\n";
 
-#my $audit_field_count_q = "select count(*) from $schema.tb_audit_field";
-#my ($audit_field_count) = $handle->selectrow_array($audit_field_count_q);
-#
-#( $audit_field_count > 0 )
-#    or die "Please run fn_update_audit_fields() before attempting to restore.\n";
-
 $handle->do( "SELECT $schema.fn_verify_partition_config()" );
 
 foreach my $file( @ARGV )
@@ -200,7 +194,7 @@ foreach my $file( @ARGV )
         }
     );
 
-    (my $table_name = $file) =~ s/\.csv\.gz$//;
+    (my $table_name = basename( $file ) ) =~ s/\.csv\.gz$//;
 
     $handle->do( "BEGIN" );
 
