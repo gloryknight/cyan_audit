@@ -152,7 +152,7 @@ foreach my $file (@ARGV)
         usage( "File '$file' is either invalid, unreadable or 0 bytes." );
     }
 
-    unless( $file =~ '^tb_audit_event_\d{8}_\d{4}\.csv\.gz$' )
+    unless( basename( $file ) =~ '^tb_audit_event_\d{8}_\d{4}\.csv\.gz$' )
     {
         usage( "$file: Filename must conform to pattern 'tb_audit_event_YYYYMMDD_HHMM.csv.gz\n" );
     }

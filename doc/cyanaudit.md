@@ -133,18 +133,18 @@ Re-scan for schema changes in all tracked schemas:
 
     SELECT cyanaudit.fn_update_audit_fields();
 
-Set up :logwhere alias by customizing this line & adding to your .psqlrc:
+Set up `:logwhere` alias by customizing this line & adding to your `.psqlrc`:
 
     \set logwhere 'select recorded, uid, user_email, txid, description, table_schema, table_name, column_name, pk_vals, op, old_value, new_value from cyanaudit.vw_audit_log where' 
 
-Use the logwhere alias (previous step) to see all activity from the last 5 minutes:
+Use the `:logwhere` alias (previous step) to see all activity from the last 5 minutes:
     
     app_db# :logwhere recorded > now() - interval '5 min';
 
 
 
-Log Maintenance Scripts
-=======================
+Log Maintenance
+===============
 
 Cyan Audit's logs are divided (sharded) into partitions, which are created every
 time you run `cyanaudit_log_rotate.pl`. If you ran it at 2016-01-10 09:00, it
@@ -167,26 +167,29 @@ Restore all backup files to an existing Cyan Audit installation:
 Important Notes
 ===============
 * Requires PostgreSQL 9.3.3 or above.
-* Not compatible with multithreaded pg_restore (-j 2+).  pg_restore sometimes
-  neglects to install the logging triggers on system tables, even though they
-  are present in the dump. No error is emitted by pg_restore.
+
+* Not compatible with multithreaded `pg_restore` (`-j 2+`).  `pg_restore`
+  sometimes neglects to install the logging triggers on system tables, even
+  though they are present in the dump. No error is emitted by `pg_restore`.
+
 * `DROP EXTENSION cyanaudit` will require `CASCADE` in order to drop the
   logging triggers on your system tables. This is because PostgreSQL does not
   currently support extensions owning triggers. Setting up the ownership in
-  pg_depend manually does allow the omission of `CASCADE`, but it causes
+  `pg_depend` manually does allow the omission of `CASCADE`, but it causes
   postgres to refuse to drop a table that is being logged, because it cannot
   drop the logging trigger without dropping the extension.
-* When querying `vw_audit_log`, being as specific as possible about your
-  `table_name` and `column_name` will greatly speed up search results.
+
 * When using with pgbouncer or other connnection poolers, you must use
   session-level pooling (not statement-level or transaction-level) for
   `fn_set_current_uid()` and `fn_label_last_txid()` to have any effect.
   Additionally, you must have the pooler issue a `DISCARD ALL` command to reset
   the persistent server connection after a client disconnects.
+
 * `fn_update_audit_fields()` will hold an exclusive lock on all of your tables
   until the function returns. On a test database with about 2500 columns, this
   took 20 seconds. Please make sure you run this at a time when it is
   acceptable for your tables to be locked for up to a minute.
+
 * When Cyan Audit finds a new column (e.g. during `fn_update_audit_fields()`),
   it will decide the default value for `enabled` as follows:
 
@@ -199,6 +202,9 @@ Important Notes
                 If any column in the database is enabled, then true.
                 Else If we know of fields in this database but all are inactive, then false.
                 Else, true
+
+* When querying `vw_audit_log`, being as specific as possible about your
+  `table_name` and `column_name` will greatly speed up search results.
 
 
 
