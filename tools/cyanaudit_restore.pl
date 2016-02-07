@@ -279,7 +279,7 @@ SQL
 
     $handle->do( "COMMIT" ) or die;
     my $delta    = ( microtime() - $start_time );
-    printf "Processed '$file' in %d:%02d minutes, skipping %d bad rows\n", 
+    printf "Processed '$file' in %d:%02d minutes, skipping %d 'no-change' rows\n", 
             $delta/60, $delta%60, scalar keys( %error_rows );
 }
 
