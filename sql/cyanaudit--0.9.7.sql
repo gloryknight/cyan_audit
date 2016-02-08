@@ -1,8 +1,8 @@
-/* TODO: 
+/* TODO:
  - transaction-specific GUC for transaction labels in real-time
    (includes function to set and unset real-time transaction label)
 */
-   
+
 ----- INITIAL SETUP -----
 do language plpgsql
  $$
@@ -50,11 +50,14 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_field
     column_name     varchar not null,
     enabled         boolean not null,
     loggable        boolean not null,
-    CONSTRAINT tb_audit_field_table_column_key 
+    CONSTRAINT tb_audit_field_table_column_key
         UNIQUE( table_schema, table_name, column_name ),
-    CONSTRAINT tb_audit_field_tb_audit_event_not_allowed 
+    CONSTRAINT tb_audit_field_tb_audit_event_not_allowed
         CHECK( table_schema != '@extschema@' )
 );
+
+COMMENT ON TABLE @extschema@.tb_audit_field
+    IS 'Each row is a column in your database. Toggle logging with the enabled flag.';
 
 alter sequence @extschema@.sq_pk_audit_field
     owned by @extschema@.tb_audit_field.audit_field;
@@ -73,6 +76,9 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_transaction_type
                             default nextval('@extschema@.sq_pk_audit_transaction_type'),
     label                   varchar unique
 );
+
+COMMENT ON TABLE @extschema@.tb_audit_transaction_type
+    IS 'A label assigned to one or more entries in the audit log.';
 
 ALTER SEQUENCE @extschema@.sq_pk_audit_transaction_type
     owned by @extschema@.tb_audit_transaction_type.audit_transaction_type;
@@ -96,9 +102,12 @@ CREATE TABLE IF NOT EXISTS @extschema@.tb_audit_event
     new_value               text
 );
 
+COMMENT ON TABLE @extschema@.tb_audit_event
+    IS 'Parent table for sharded audit logs. Only child tables contain data.';
+
 ALTER TABLE @extschema@.tb_audit_event
     ADD CONSTRAINT tb_audit_event_consistency_chk
-        CHECK( case row_op when 'I' then old_value is null when 'D' then new_value is null 
+        CHECK( case row_op when 'I' then old_value is null when 'D' then new_value is null
                            when 'U' then old_value is distinct from new_value else false end );
 
 
@@ -139,22 +148,13 @@ as $_$
     select (set_config('cyanaudit._uid', in_uid::varchar, false))::integer;
  $_$;
 
+COMMENT ON FUNCTION @extschema@.fn_set_current_uid( integer )
+    IS 'Sets the uid to which future operations in this session will be attributed.';
 
--- fn_set_audit_uid
-CREATE OR REPLACE FUNCTION @extschema@.fn_set_audit_uid( in_uid integer )
-returns integer as 
- $_$
-    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
-
-    select @extschema@.fn_set_current_uid( in_uid );
- $_$
-    language sql;
-
-    
 
 -- fn_get_current_uid
-CREATE OR REPLACE FUNCTION @extschema@.fn_get_current_uid() 
-returns integer 
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_current_uid()
+returns integer
 language plpgsql stable
 as $_$
 declare
@@ -170,6 +170,37 @@ begin
     return @extschema@.fn_set_current_uid( coalesce( my_uid, 0 ) );
 end
  $_$;
+
+COMMENT ON FUNCTION @extschema@.fn_get_current_uid()
+    IS 'Returns the uid set by fn_set_current_uid(), or 0 if unset..';
+
+
+
+-- fn_set_audit_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_set_audit_uid( in_uid integer )
+returns integer as
+ $_$
+    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
+    select @extschema@.fn_set_current_uid( in_uid );
+ $_$
+    language sql;
+
+COMMENT ON FUNCTION @extschema@.fn_set_audit_uid( integer )
+    IS 'Deprecated function. Will soon be removed. Use fn_set_current_uid()';
+
+
+
+-- fn_get_audit_uid
+CREATE OR REPLACE FUNCTION @extschema@.fn_get_audit_uid()
+returns integer as
+ $_$
+    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
+    select @extschema@.fn_get_current_uid();
+ $_$
+    language sql;
+
+COMMENT ON FUNCTION @extschema@.fn_get_audit_uid()
+    IS 'Deprecated function. Will soon be removed. Use fn_get_current_uid()';
 
 
 -- fn_get_last_txid
@@ -214,14 +245,14 @@ begin
 end
  $_$;
 
-        
+
 -- fn_label_transaction
 CREATE OR REPLACE FUNCTION @extschema@.fn_label_transaction
 (
     in_label    varchar,
     in_txid     bigint default txid_current()
 )
-returns void 
+returns void
 as $_$
     update @extschema@.tb_audit_event
        set audit_transaction_type = @extschema@.fn_get_or_create_audit_transaction_type( in_label )
@@ -229,6 +260,9 @@ as $_$
        and audit_transaction_type is null;
  $_$
     language sql;
+
+COMMENT ON FUNCTION @extschema@.fn_label_transaction( varchar, bigint )
+    IS 'Applies description to completed operations in the given transaction.';
 
 
 
@@ -241,10 +275,12 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_label_audit_transaction
 returns void AS
  $_$
     -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
-
     SELECT @extschema@.fn_label_transaction( in_label, in_txid );
  $_$
     language sql;
+
+COMMENT ON FUNCTION @extschema@.fn_label_audit_transaction( varchar, bigint )
+    IS 'Deprecated and will soon be removed. Use fn_label_transaction().';
 
 
 
@@ -253,15 +289,18 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_label_last_transaction
 (
     in_label    varchar
 )
-returns void as 
+returns void as
  $_$
     select @extschema@.fn_label_transaction
            (
-                in_label, 
+                in_label,
                 @extschema@.fn_get_last_txid()
            );
  $_$
     language sql strict;
+
+COMMENT ON FUNCTION @extschema@.fn_label_last_transaction( varchar )
+    IS 'Shorthand for: fn_label_last_transaction( in_label, @extschema@.fn_get_last_txid() )';
 
 
 -- fn_label_last_audit_transaction
@@ -276,6 +315,9 @@ returns void AS
     SELECT @extschema@.fn_label_last_transaction( in_label );
  $_$
     language sql;
+
+COMMENT ON FUNCTION @extschema@.fn_label_last_audit_transaction( varchar )
+    IS 'Deprecated and will soon be removed. Use fn_label_last_transaction()';
 
 
 
@@ -292,7 +334,7 @@ declare
     my_statement    varchar;
 begin
     for my_statement in
-        select query 
+        select query
           from @extschema@.vw_undo_statement
          where txid = in_txid
     loop
@@ -316,6 +358,9 @@ returns setof varchar as
  $_$
     language 'sql';
 
+COMMENT ON FUNCTION @extschema@.fn_undo_last_transaction()
+    IS 'Shorthand for: @extschema@.fn_undo_transaction( @extschema@.fn_get_last_txid() )';
+
 
 
 -- fn_update_audit_fields
@@ -324,7 +369,7 @@ returns setof varchar as
 CREATE OR REPLACE FUNCTION @extschema@.fn_update_audit_fields
 (
     in_schema            varchar default null
-) 
+)
 returns void as
  $_$
 declare
@@ -334,7 +379,7 @@ begin
         return;
     end if;
 
-    -- Add only those tables in the passed-in schemas. 
+    -- Add only those tables in the passed-in schemas.
     -- If no schemas are passed in, use only those we already know about.
     -- This way, we will never log any schema that has not been explicitly
     -- requested to be logged.
@@ -351,7 +396,7 @@ begin
                (
                     af.audit_field,
                     @extschema@.fn_get_or_create_audit_field
-                    ( 
+                    (
                         n.nspname::varchar,
                         c.relname::varchar,
                         a.attname::varchar
@@ -370,7 +415,7 @@ begin
                join pg_constraint cn
                  on conrelid = c.oid
                 and cn.contype = 'p'
-               ) 
+               )
      full join @extschema@.tb_audit_field af
             on af.table_schema = n.nspname::varchar
            and af.table_name   = c.relname::varchar
@@ -388,6 +433,9 @@ begin
 end;
  $_$
     language 'plpgsql';
+
+COMMENT ON FUNCTION @extschema@.fn_update_audit_fields( varchar )
+    IS 'Updates tb_audit_field to reflect any new or dropped columns in known schemas.';
 
 
 
@@ -445,10 +493,10 @@ begin
 
     return my_email;
 exception
-    when undefined_table then 
+    when undefined_table then
          raise notice 'cyanaudit: Invalid user_table setting: ''%''', my_user_table;
          return null;
-    when undefined_column then 
+    when undefined_column then
          raise notice 'cyanaudit: Invalid user_table_uid_col (''%'') or user_table_email_col (''%'')',
             my_user_table_uid_col, my_user_table_email_col;
          return null;
@@ -494,10 +542,10 @@ begin
 
     return my_uid;
 exception
-    when undefined_table then 
+    when undefined_table then
          raise notice 'cyanaudit: Invalid user_table setting: ''%''', my_user_table;
          return null;
-    when undefined_column then 
+    when undefined_column then
          raise notice 'cyanaudit: Invalid user_table_uid_col (''%'') or user_table_username_col (''%'')',
             my_user_table_uid_col, my_user_table_username_col;
          return null;
@@ -595,7 +643,7 @@ begin
         values
         (
             in_table_schema,
-            in_table_name, 
+            in_table_name,
             in_column_name
         )
         returning audit_field
@@ -610,7 +658,7 @@ begin
 end
  $_$
     language 'plpgsql';
-        
+
 
 -- fn_log_audit_event
 CREATE OR REPLACE FUNCTION @extschema@.fn_log_audit_event()
@@ -698,7 +746,7 @@ BEGIN
                      || 'VALUES(  $1, $2, $3, $4, $5::char(1), $6, $7 ) ',
                         my_column_name
                       )
-          USING my_audit_field, 
+          USING my_audit_field,
                 my_clock_timestamp,
                 my_pk_vals,
                 @extschema@.fn_get_current_uid(),
@@ -717,6 +765,9 @@ EXCEPTION
          return NEW;
 END
 $_$;
+
+COMMENT ON FUNCTION @extschema@.fn_log_audit_event()
+    IS 'Trigger function installed on all tables logged by the cyanaudit extension.';
 
 
 
@@ -746,7 +797,7 @@ begin
             raise exception 'Updating table_schema, table_name or column_name not allowed.';
         end if;
     end if;
-    
+
    perform *
       from pg_attribute a
       join pg_class c
@@ -803,7 +854,7 @@ CREATE TRIGGER tr_before_audit_field_change
 
 -- fn_after_audit_field_change
 CREATE OR REPLACE FUNCTION @extschema@.fn_after_audit_field_change()
-returns trigger 
+returns trigger
 language plpgsql
 as $_$
 declare
@@ -847,7 +898,7 @@ begin
 
     IF array_length(my_audit_fields, 1) > 0 THEN
         my_pk_colnames := @extschema@.fn_get_table_pk_cols( NEW.table_name, NEW.table_schema );
-            
+
         -- Create the table trigger (if it doesn't exist) to call the function
         execute format( 'CREATE TRIGGER tr_log_audit_event '
                      || 'AFTER INSERT OR UPDATE OR DELETE ON %I.%I FOR EACH ROW '
@@ -984,6 +1035,9 @@ begin
 end;
  $_$;
 
+COMMENT ON FUNCTION @extschema@.fn_create_event_trigger()
+    IS 'Installs event trigger to run fn_update_audit_fields() on any schema change.';
+
 
 
 
@@ -991,7 +1045,7 @@ end;
 
 -- fn_redirect_audit_events
 -- This trigger function is installed onto tb_audit_event
-CREATE OR REPLACE FUNCTION @extschema@.fn_redirect_audit_events() 
+CREATE OR REPLACE FUNCTION @extschema@.fn_redirect_audit_events()
 returns trigger as
  $_$
 declare
@@ -1085,6 +1139,13 @@ begin
                  || 'INHERITS ( @extschema@.tb_audit_event )',
                     in_new_table_name );
 
+    execute format( 'GRANT insert, '
+                 || '      select (audit_transaction_type, txid), '
+                 || '      update (audit_transaction_type) '
+                 || '   ON @extschema@.%I '
+                 || '   TO public ',
+                    in_new_table_name );
+
     execute format( 'ALTER EXTENSION cyanaudit ADD TABLE @extschema@.%I', in_new_table_name );
 
     SET LOCAL client_min_messages to NOTICE;
@@ -1148,7 +1209,7 @@ begin
     foreach my_index_column in array my_index_columns
     loop
         my_index_name := format( 'ix_%s_%s', right( in_table_name, -3 ), my_index_column );
-        
+
         perform *
            from pg_index i
            join pg_class ci
@@ -1172,11 +1233,11 @@ begin
                 on c.relnamespace = n.oid
                and n.nspname = '@extschema@'
              where c.relname = in_table_name;
-            
+
             execute format( 'CREATE INDEX %I on @extschema@.%I ( %I ) %s',
-                            my_index_name, 
-                            in_table_name, 
-                            my_index_column, 
+                            my_index_name,
+                            in_table_name,
+                            my_index_column,
                             coalesce( my_tablespace_clause, '' )
                           );
         end if;
@@ -1188,7 +1249,7 @@ end
  $_$
     language plpgsql;
 
-    
+
 -- fn_setup_partition_constraints
 CREATE OR REPLACE FUNCTION @extschema@.fn_setup_partition_constraints
 (
@@ -1220,7 +1281,7 @@ begin
         and c.relname = in_table_name;
 
     if found then
-        execute format( 'alter table @extschema@.%I drop constraint %I', 
+        execute format( 'alter table @extschema@.%I drop constraint %I',
                         in_table_name, my_constraint_name );
     end if;
 
@@ -1230,7 +1291,7 @@ begin
 
     if in_table_name = @extschema@.fn_get_active_partition_name() then
         execute format( 'ALTER TABLE @extschema@.%I add constraint %I '
-                     || ' CHECK( recorded > %L )', 
+                     || ' CHECK( recorded > %L )',
                         in_table_name, my_constraint_name, coalesce( my_min_recorded, now() ) );
     elsif my_min_recorded is not null then
         execute format( 'ALTER TABLE @extschema@.%I add constraint %I '
@@ -1330,7 +1391,7 @@ begin
                     in_partition_name, my_archive_tablespace );
 
     for my_index_name in
-        select ci.relname 
+        select ci.relname
           from pg_index i
           join pg_class ci
             on i.indexrelid = ci.oid
@@ -1358,7 +1419,7 @@ CREATE OR REPLACE FUNCTION @extschema@.fn_prune_archive
 (
     in_keep_qty     integer
 )
-returns setof varchar as 
+returns setof varchar as
  $_$
 declare
     my_table_name           varchar;
@@ -1394,10 +1455,10 @@ end
 -- vw_audit_log
 -- This is the main user interface to the cyanaudit log.
 CREATE OR REPLACE VIEW @extschema@.vw_audit_log as
-   select ae.recorded, 
-          ae.uid, 
+   select ae.recorded,
+          ae.uid,
           @extschema@.fn_get_email_by_uid(ae.uid) as user_email,
-          ae.txid, 
+          ae.txid,
           att.label as description,
           (case when af.table_schema = any(current_schemas(true))
                then af.table_name
@@ -1413,12 +1474,15 @@ CREATE OR REPLACE VIEW @extschema@.vw_audit_log as
 left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
  order by ae.recorded desc, af.table_name, af.column_name;
 
+COMMENT ON VIEW @extschema@.vw_audit_log
+    IS 'User-friendly view with which to inspect the Cyan Audit logs.';
+
 
 -- vw_undo_statement
 CREATE OR REPLACE VIEW @extschema@.vw_undo_statement AS
    select ae.txid,
           (case ae.row_op
-           when 'D' then 
+           when 'D' then
                 format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
                         af.table_schema,
                         af.table_name,
@@ -1447,9 +1511,12 @@ CREATE OR REPLACE VIEW @extschema@.vw_undo_statement AS
           end)::varchar as query
      from @extschema@.tb_audit_event ae
      join @extschema@.tb_audit_field af using(audit_field)
- group by af.table_schema, af.table_name, ae.row_op, 
+ group by af.table_schema, af.table_name, ae.row_op,
           ae.pk_vals, ae.recorded, ae.txid
  order by ae.recorded desc;
+
+COMMENT ON VIEW @extschema@.vw_undo_statement
+    IS 'Reconstructed SQL statements that can be used to play a transaction''s DML in reverse.';
 
 
 
@@ -1458,7 +1525,7 @@ CREATE OR REPLACE VIEW @extschema@.vw_undo_statement AS
 -- DEPRECATED. DO NOT USE.
 -- Not accurate for updates to pk columns (WHERE lists new PK, not old)
 CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
-   select ae.txid, 
+   select ae.txid,
           (case ae.row_op
            when 'I' then
                 format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
@@ -1490,11 +1557,16 @@ CREATE OR REPLACE VIEW @extschema@.vw_audit_transaction_statement as
      from @extschema@.tb_audit_event ae
      join @extschema@.tb_audit_field af using(audit_field)
 left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type)
- group by af.table_schema, af.table_name, ae.row_op, 
-          ae.pk_vals, ae.txid, ae.recorded, att.label, 
+ group by af.table_schema, af.table_name, ae.row_op,
+          ae.pk_vals, ae.txid, ae.recorded, att.label,
           @extschema@.fn_get_email_by_uid(ae.uid),
           @extschema@.fn_get_table_pk_cols(af.table_name, af.table_schema)
  order by ae.recorded;
+
+COMMENT ON VIEW @extschema@.vw_audit_transaction_statement
+    IS 'Deprecated. Do not use. Statements are not correct for updates to pk columns.';
+
+
 
 
 
@@ -1508,10 +1580,10 @@ grant  usage
 grant  usage
        on all sequences in schema @extschema@     to public;
 
-grant  insert, select 
+grant  insert, select
        on @extschema@.tb_audit_transaction_type   to public;
 
-grant  insert, 
-       select (audit_transaction_type, txid), 
-       update (audit_transaction_type) 
+grant  insert,
+       select (audit_transaction_type, txid),
+       update (audit_transaction_type)
        on @extschema@.tb_audit_event              to public;
