@@ -186,8 +186,8 @@ Important Notes
   the persistent server connection after a client disconnects.
 
 * `fn_update_audit_fields()` will hold an exclusive lock on all of your tables
-  until the function returns. On a test database with about 2500 columns, this
-  took 20 seconds. Please make sure you run this at a time when it is
+  until the function returns. On a test database with about 3500 columns, this
+  took 12 seconds. Please make sure you run this at a time when it is
   acceptable for your tables to be locked for up to a minute.
 
 * When Cyan Audit finds a new column (e.g. during `fn_update_audit_fields()`),

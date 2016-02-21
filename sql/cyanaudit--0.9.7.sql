@@ -1,6 +1,8 @@
 /* TODO:
  - transaction-specific GUC for transaction labels in real-time
    (includes function to set and unset real-time transaction label)
+ - Do not overwrite database-specific GUCs at install if already set
+ - Remove compatibility functions
 */
 
 ----- INITIAL SETUP -----

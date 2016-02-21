@@ -42,11 +42,15 @@ these directions precisely:
         SELECT cyanaudit.fn_update_audit_fields('public'); --run on all logged schemas
         SELECT cyanaudit.fn_create_event_trigger();
 
-11. Reenable connections to your database:
+11. Set up cyanaudit.archive_tablespace GUC:
+
+        ALTER DATABASE <yourdb> SET cyanaudit.archive_tablespace = 'big_slow';
+
+12. Reenable connections to your database:
 
         ALTER DATABASE <yourdb> CONNECTION LIMIT -1;
 
-12. Restore audit_field states:
+13. Restore audit_field states:
 
         UPDATE cyanaudit.tb_audit_field af
            SET enabled = afb.enabled
@@ -55,6 +59,8 @@ these directions precisely:
            AND afb.table_name = af.table_name
            AND afb.column_name = af.column_name;
 
-13. Restore old backups using the new `cyanaudit_restore.pl`
+14. Restore old backups using the new `cyanaudit_restore.pl`
+
+15. Finish configuring other cyanaudit GUCs
     
 
