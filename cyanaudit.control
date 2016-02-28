@@ -1,5 +1,5 @@
 comment = 'Cyan Audit logging system'
-default_version = '0.9.7'
+default_version = '1.0.0'
 relocatable = false
 superuser = true
 requires = 'plpgsql'

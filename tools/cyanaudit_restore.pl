@@ -208,7 +208,7 @@ foreach my $file( @ARGV )
         next;
     }
 
-#    $handle->do( "SELECT $schema.fn_archive_partition( '$table_name' )" ) or die;
+    $handle->do( "SELECT $schema.fn_archive_partition( '$table_name' )" ) or die;
 
     my $copy_q = <<SQL;
         COPY $schema.$table_name
