@@ -3,9 +3,10 @@ pg_restore, the cyanaudit event trigger must always be created manually using
 SELECT fn_create_event_trigger(). This is because of limitations with the
 pg_restore process.
 
-If we create the event trigger at install time, the extension will install the
-logging triggers onto all of the tables before pg_restore creates the same exact
-triggers from the backup, causing tons of undesirable warnings from pg_restore.
+If the extension creates the event trigger automatically, the extension will
+install the logging triggers onto all of the tables before pg_restore creates
+the same exact triggers from the backup, causing tons of undesirable warnings
+from pg_restore.
 
 If there were a flag by which one could tell if pg_restore was currently
 running, the event trigger could be instructed to do nothing in that case.
