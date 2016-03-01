@@ -276,6 +276,7 @@ SQL
 
     $handle->do("SELECT $schema.fn_create_partition_indexes( '$table_name' )" ) or die;
     $handle->do("SELECT $schema.fn_setup_partition_constraints( '$table_name' )" ) or die;
+    $handle->do("SELECT $schema.fn_setup_partition_inheritance( '$table_name' )" ) or die;
 
     $handle->do( "COMMIT" ) or die;
     my $delta    = ( microtime() - $start_time );

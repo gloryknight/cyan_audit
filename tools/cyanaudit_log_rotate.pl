@@ -57,10 +57,12 @@ print "Created new archive table $schema.$table_name.\n";
 print "Finalizing indexes and constraints... ";
 $handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $table_name );
 $handle->do( "select $schema.fn_create_partition_indexes( ? )", undef, $table_name );
+$handle->do( "select $schema.fn_setup_partition_inheritance( ? )", undef, $table_name );
 $handle->do( "select $schema.fn_activate_partition( ? )", undef, $table_name );
 
 if( $old_table_name )
 {
+    $handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $old_table_name );
     $handle->do( "select $schema.fn_archive_partition( ? )", undef, $old_table_name );
 }
 

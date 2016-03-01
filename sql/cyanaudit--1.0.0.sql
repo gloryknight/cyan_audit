@@ -1136,9 +1136,8 @@ begin
 
     execute format( 'CREATE TABLE @extschema@.%I '
                  || '( '
-                 || '  LIKE @extschema@.tb_audit_event INCLUDING STORAGE '
-                 || ') '
-                 || 'INHERITS ( @extschema@.tb_audit_event )',
+                 || '  LIKE @extschema@.tb_audit_event INCLUDING STORAGE INCLUDING CONSTRAINTS '
+                 || ') ',
                     in_new_table_name );
 
     execute format( 'GRANT insert, '
@@ -1352,6 +1351,44 @@ end
     language plpgsql;
 
 
+-- fn_setup_partition_inheritance
+CREATE OR REPLACE FUNCTION @extschema@.fn_setup_partition_inheritance
+(
+    in_partition_name   varchar
+)
+returns void as
+ $_$
+begin
+    if in_partition_name is null then
+        raise exception 'in_partition_name must not be null.';
+    end if;
+
+    -- See if inheritance is already set up for this table
+    perform *
+       from pg_inherits i
+       join pg_class c_child
+         on i.inhrelid = c_child.oid
+       join pg_namespace n_child
+         on c_child.relnamespace = n_child.oid
+        and n_child.nspname = '@extschema@'
+       join pg_class c_parent
+         on i.inhparent = c_parent.oid
+       join pg_namespace n_parent
+         on c_parent.relnamespace = n_parent.oid
+        and n_parent.nspname = '@extschema@'
+      where c_child.relname = in_partition_name
+        and c_parent.relname = 'tb_audit_event';
+
+    -- If not, then set it up!
+    if not found then
+        execute format( 'ALTER TABLE @extschema@.%I INHERIT @extschema@.tb_audit_event',
+                        in_partition_name );
+    end if;
+end
+ $_$
+    language plpgsql;
+
+
 -- fn_verify_partition_config()
 CREATE OR REPLACE FUNCTION @extschema@.fn_verify_partition_config()
 returns varchar as
@@ -1366,6 +1403,7 @@ begin
         perform @extschema@.fn_create_partition_indexes( my_partition_name );
         perform @extschema@.fn_activate_partition( my_partition_name );
         perform @extschema@.fn_setup_partition_constraints( my_partition_name );
+        perform @extschema@.fn_setup_partition_inheritance( my_partition_name );
     end if;
 
     return my_partition_name;
@@ -1568,8 +1606,6 @@ left join @extschema@.tb_audit_transaction_type att using(audit_transaction_type
 
 COMMENT ON VIEW @extschema@.vw_audit_transaction_statement
     IS 'Deprecated. Do not use. Statements are not correct for updates to pk columns.';
-
-
 
 
 

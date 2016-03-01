@@ -1,3 +1,15 @@
+0.9.7 -> 1.0.0
+--------------
+- cyanaudit_restore.pl now sets up constraints on restored partition before
+  setting up inheritance, to avoid locking parent table while constraints are
+  validated.
+- cyanaudit_log_rotate.pl now correctly recreates constraints on archived table.
+- fn_create_partition_indexes() now works correctly with non-default tablespace.
+- fn_prune_archive(), called by cyanaudit_log_rotate.pl, now correctly drops the
+  extension dependency before dropping the table.
+- cyanaudit_restore.pl now correctly archives the partition before restoring.
+
+
 0.9.6 -> 0.9.7
 --------------
 - Can now log tables with multi-column PKs.

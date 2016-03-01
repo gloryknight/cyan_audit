@@ -1,0 +1,22 @@
+After the cyanaudit extension is created, whether manually or through
+pg_restore, the cyanaudit event trigger must always be created manually using
+SELECT fn_create_event_trigger(). This is because of limitations with the
+pg_restore process.
+
+If we create the event trigger at install time, the extension will install the
+logging triggers onto all of the tables before pg_restore creates the same exact
+triggers from the backup, causing tons of undesirable warnings from pg_restore.
+
+If there were a flag by which one could tell if pg_restore was currently
+running, the event trigger could be instructed to do nothing in that case.
+However, there is no such flag.
+
+If we set up the triggers as owned by the extension, they would not be backed up
+by pg_dump and therefore not restored by pg_restore. The dependencies would need
+to be set up manually in pg_depend with a deptype of 'e' at the time of trigger
+creation.  However, if this is done, a table with the logging trigger cannot be
+dropped because the trigger is required by the extension.
+
+If it were possible to fire an event trigger *before* a sql_drop, we could drop
+the dependency before the table was dropped. But this is not currently possible.
+
