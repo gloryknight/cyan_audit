@@ -203,10 +203,10 @@ EXCEPTION
     WHEN undefined_column THEN
          raise notice 'cyanaudit: Attempt to log deleted column. Please run @extschema@.fn_update_audit_fields() as superuser.';
          return NEW;
-    WHEN insufficient_privilege
+    WHEN insufficient_privilege THEN
          raise notice 'cyanaudit: Incorrect permissions. Operation not logged';
          return NEW;
-    WHEN others
+    WHEN others THEN
          raise notice 'cyanaudit: Unknown exception. Operation not logged';
          return NEW;
 END
