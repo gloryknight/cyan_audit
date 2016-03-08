@@ -52,6 +52,11 @@ print "Found cyanaudit in schema '$schema'\n";
 my ($old_table_name) = $handle->selectrow_array( "select $schema.fn_get_active_partition_name()" );
 my ($table_name) = $handle->selectrow_array( "select $schema.fn_create_new_partition()" ) or die; 
 
+unless( $table_name )
+{
+    die "No events to rotate. Exiting.\n";
+}
+
 print "Created new archive table $schema.$table_name.\n";
 
 print "Finalizing indexes and constraints... ";

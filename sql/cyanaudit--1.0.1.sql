@@ -765,6 +765,12 @@ EXCEPTION
     WHEN undefined_column THEN
          raise notice 'cyanaudit: Attempt to log deleted column. Please run @extschema@.fn_update_audit_fields() as superuser.';
          return NEW;
+    WHEN insufficient_privilege
+         raise notice 'cyanaudit: Incorrect permissions. Operation not logged';
+         return NEW;
+    WHEN others
+         raise notice 'cyanaudit: Unknown exception. Operation not logged';
+         return NEW;
 END
 $_$;
 
@@ -1292,7 +1298,7 @@ begin
 
     if in_table_name = @extschema@.fn_get_active_partition_name() then
         execute format( 'ALTER TABLE @extschema@.%I add constraint %I '
-                     || ' CHECK( recorded > %L )',
+                     || ' CHECK( recorded >= %L )',
                         in_table_name, my_constraint_name, coalesce( my_min_recorded, now() ) );
     elsif my_min_recorded is not null then
         execute format( 'ALTER TABLE @extschema@.%I add constraint %I '

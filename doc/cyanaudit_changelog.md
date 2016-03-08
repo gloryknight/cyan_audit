@@ -1,3 +1,12 @@
+1.0.0 -> 1.0.1
+--------------
+- Logging function now catches permission and other exceptions to prevent
+  bringing down the system when events cannot be logged.
+- cyanaudit_log_rotate.pl now exits cleanly if there are no events to rotate.
+- Instructions now correctly reflect that package is a .zip not .tar.gz
+- Installation package now includes all necessary files
+- Partition range constraints use >= instead of > now.
+
 0.9.7 -> 1.0.0
 --------------
 - cyanaudit_restore.pl now sets up constraints on restored partition before

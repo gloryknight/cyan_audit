@@ -7,7 +7,6 @@ SCRIPTS      = $(wildcard tools/*.p[lm]) $(wildcard tools/*.sh)
 
 PG_CONFIG    = pg_config
 DATA         = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION)--$(EXTVERSION).sql
-PKG_SQL      = $(wildcard sql/$(EXTENSION)--*--*.sql)
 
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
@@ -31,7 +30,7 @@ endif
 #############################
 ### Packaging for release ###
 #############################
-PKGFILES     = cyanaudit.control LICENSE README.md Makefile META.json $(PKG_SQL) $(DOCS) $(SCRIPTS)
+PKGFILES     = cyanaudit.control LICENSE README.md Makefile META.json $(DATA) $(DOCS) $(SCRIPTS)
 
 PKGNAME      = $(EXTENSION)-$(EXTVERSION)
 PKG_TGZ      = dist/$(PKGNAME).tar.gz
@@ -41,7 +40,7 @@ sdist: $(PKG_TGZ)
 
 
 # Tarball must be rebuilt anytime a package file changes
-$(PKG_TGZ):$(PKGFILES)
+$(PKG_TGZ): $(PKGFILES)
 	ln -sf . $(PKGNAME)
 	mkdir -p dist
 	rm -f $(PKG_TGZ)

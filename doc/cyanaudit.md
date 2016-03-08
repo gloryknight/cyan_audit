@@ -16,10 +16,10 @@ Basic Usage
 Install Cyan Audit:
 
     $ su
-    # tar zxvf cyanaudit-X.X.X.tar.gz
+    # unzip cyanaudit-X.X.X.zip
     # cd cyanaudit-X.X.X
     # make install
-    # psql -U postgres -h /tmp -d app_db
+    # psql -U postgres -d app_db
     app_db# CREATE EXTENSION cyanaudit;
     app_db# select cyanaudit.fn_create_event_trigger();
 
