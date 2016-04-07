@@ -1433,9 +1433,6 @@ declare
 begin
     my_archive_tablespace := @extschema@.fn_get_config( 'archive_tablespace' );
 
-    execute format( 'alter table @extschema@.%I set tablespace %I',
-                    in_partition_name, my_archive_tablespace );
-
     for my_index_name in
         select ci.relname
           from pg_index i
@@ -1452,6 +1449,9 @@ begin
         execute format( 'alter index @extschema@.%I set tablespace %I',
                         my_index_name, my_archive_tablespace );
     end loop;
+
+    execute format( 'alter table @extschema@.%I set tablespace %I',
+                    in_partition_name, my_archive_tablespace );
 exception
     when undefined_object then
         raise exception 'cyanaudit: Missing setting for cyanaudit.archive_tablespace. Aborting.';

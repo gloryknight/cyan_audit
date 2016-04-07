@@ -53,8 +53,8 @@ The audit log view looks like this:
     | column_name | Column whose values are given in old_value and new_value.
     | pk_vals[]   | affected row's pk values (after update) cast as text.
     | op          | operation ('I', 'U', or 'D')  
-    | old_value   | NULL on 'I'. Never NULL on 'D'. IS DISTINCT FROM old_value.
-    | new_value   | NULL on 'D'. Never NULL on 'I'. IS DISTINCT FROM new_value.
+    | old_value   | NULL on 'I'. Never NULL on 'D'. IS DISTINCT FROM new_value.
+    | new_value   | NULL on 'D'. Never NULL on 'I'. IS DISTINCT FROM old_value.
 
 With `\pset format wrapped`, these columns fit comfortably across the screen.
 

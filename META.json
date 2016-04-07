@@ -45,6 +45,13 @@
     },
     "release_status": "stable",
     "resources": {
-        "homepage": "http://cyanaudit.neadwerx.com"
+        "homepage": "http://cyanaudit.neadwerx.com",
+        "repository": {
+          "web": "https://bitbucket.org/neadwerx/cyanaudit"
+          "url": "git@bitbucket.org:neadwerx/cyanaudit.git"
+          "web": "https://github.com/theory/pgtap",
+          "type": "git"
+        }
+
     }
 }

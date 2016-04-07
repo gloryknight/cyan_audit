@@ -1,3 +1,8 @@
+1.0.1 -> 1.0.2
+--------------
+- Order of operations in fn_archive_partition changed to reduce duration of
+  exclusive lock on tb_audit_event, which could cause lockups during archival.
+
 1.0.0 -> 1.0.1
 --------------
 - Logging function now catches permission and other exceptions to prevent
