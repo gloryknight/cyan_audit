@@ -1,0 +1,4 @@
+- Reporting functions to show:
+    - table sizes
+    - %-breakdown of logging by column
+- cron job to email the report
