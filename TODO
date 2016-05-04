@@ -2,3 +2,4 @@
     - table sizes
     - %-breakdown of logging by column
 - cron job to email the report
+- Better exception reporting for unknown exceptions
