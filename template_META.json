@@ -45,6 +45,12 @@
     },
     "release_status": "stable",
     "resources": {
-        "homepage": "http://cyanaudit.neadwerx.com"
+        "homepage": "http://cyanaudit.neadwerx.com",
+        "repository": {
+          "web": "https://bitbucket.org/neadwerx/cyanaudit",
+          "url": "https://bitbucket.org/neadwerx/cyanaudit.git",
+          "type": "git"
+        }
+
     }
 }

@@ -2,3 +2,4 @@ dist
 test
 .*.swp
 .tags
+META.json
