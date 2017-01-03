@@ -16,21 +16,9 @@ begin
     my_version := regexp_matches(version(), 'PostgreSQL (\d)+\.(\d+)\.(\d+)');
 
     -- Verify minimum version
-    if my_version < array[9,3,3]::integer[] then
-        raise exception 'Cyan Audit requires PostgreSQL 9.3.3 or above';
+    if my_version < array[9,6,0]::integer[] then
+        raise exception 'Cyan Audit requires PostgreSQL 9.6.0 or above';
     end if;
-
-    -- Set default values for configuration parameters
-    my_command := 'alter database ' || quote_ident(current_database()) || ' set cyanaudit.';
-    execute my_command || 'enabled = 1';
-    execute my_command || 'archive_tablespace = pg_default';
-    execute my_command || 'user_table = '''' ';
-    execute my_command || 'user_table_uid_col = '''' ';
-    execute my_command || 'user_table_email_col = '''' ';
-    execute my_command || 'user_table_username_col = '''' ';
-    execute my_command || '_audit_transaction_type = '''' ';
-    execute my_command || '_uid = -1';
-    execute my_command || '_last_txid = '''' ';
 end;
  $$;
 
@@ -64,9 +52,6 @@ COMMENT ON TABLE cyanaudit.tb_audit_field
 alter sequence cyanaudit.sq_pk_audit_field
     owned by cyanaudit.tb_audit_field.audit_field;
 
-SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_field','');
-SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_field','');
-
 
 
 -- tb_audit_transaction_type
@@ -85,9 +70,14 @@ COMMENT ON TABLE cyanaudit.tb_audit_transaction_type
 ALTER SEQUENCE cyanaudit.sq_pk_audit_transaction_type
     owned by cyanaudit.tb_audit_transaction_type.audit_transaction_type;
 
-SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_transaction_type','');
-SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_transaction_type','');
 
+
+-- tb_config
+CREATE TABLE IF NOT EXISTS cyanaudit.tb_config
+(
+    name    varchar(100) primary key,
+    value   text
+);
 
 
 -- tb_audit_event
@@ -113,31 +103,11 @@ ALTER TABLE cyanaudit.tb_audit_event
                            when 'U' then old_value is distinct from new_value else false end );
 
 
-
 ------------------------
 ------ FUNCTIONS ------
 ------------------------
 
 ----- User/Application Functions ----
-
--- fn_get_config
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_config
-(
-    in_config_name  varchar
-)
-returns text as
- $_$
-declare
-    my_config_value text;
-begin
-    return nullif( current_setting( 'cyanaudit.'||in_config_name ), '' );
-exception
-    when others then
-        return null;
-end
- $_$
-    language plpgsql strict;
-
 
 -- fn_set_current_uid
 CREATE OR REPLACE FUNCTION cyanaudit.fn_set_current_uid
@@ -147,7 +117,7 @@ CREATE OR REPLACE FUNCTION cyanaudit.fn_set_current_uid
 returns integer
 language sql strict
 as $_$
-    select (set_config('cyanaudit._uid', in_uid::varchar, false))::integer;
+    select set_config( 'cyanaudit._uid', in_uid::varchar, false )::integer;
  $_$;
 
 COMMENT ON FUNCTION cyanaudit.fn_set_current_uid( integer )
@@ -162,14 +132,20 @@ as $_$
 declare
     my_uid    integer;
 begin
-    my_uid := cyanaudit.fn_get_config('_uid')::integer;
+    my_uid := nullif( current_setting( 'cyanaudit._uid', true ), '' );
 
     if my_uid is null or my_uid < 0 then
         select cyanaudit.fn_get_uid_by_username(current_user::varchar)
           into my_uid;
+
+        return cyanaudit.fn_set_current_uid( coalesce( my_uid, 0 ) );
     end if;
 
-    return cyanaudit.fn_set_current_uid( coalesce( my_uid, 0 ) );
+    return my_uid;
+exception
+    when undefined_object then
+        return null;
+
 end
  $_$;
 
@@ -178,39 +154,12 @@ COMMENT ON FUNCTION cyanaudit.fn_get_current_uid()
 
 
 
--- fn_set_audit_uid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_set_audit_uid( in_uid integer )
-returns integer as
- $_$
-    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
-    select cyanaudit.fn_set_current_uid( in_uid );
- $_$
-    language sql;
-
-COMMENT ON FUNCTION cyanaudit.fn_set_audit_uid( integer )
-    IS 'Deprecated function. Will soon be removed. Use fn_set_current_uid()';
-
-
-
--- fn_get_audit_uid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_audit_uid()
-returns integer as
- $_$
-    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
-    select cyanaudit.fn_get_current_uid();
- $_$
-    language sql;
-
-COMMENT ON FUNCTION cyanaudit.fn_get_audit_uid()
-    IS 'Deprecated function. Will soon be removed. Use fn_get_current_uid()';
-
-
 -- fn_get_last_txid
 CREATE OR REPLACE FUNCTION cyanaudit.fn_get_last_txid()
 returns bigint
 language sql stable
 as $_$
-    SELECT (cyanaudit.fn_get_config('_last_txid'))::bigint;
+    select current_setting( 'cyanaudit._last_txid', true )::bigint;
  $_$;
 
 
@@ -268,24 +217,6 @@ COMMENT ON FUNCTION cyanaudit.fn_label_transaction( varchar, bigint )
 
 
 
--- fn_label_audit_transaction
-CREATE OR REPLACE FUNCTION cyanaudit.fn_label_audit_transaction
-(
-    in_label    varchar,
-    in_txid     bigint default txid_current()
-)
-returns void AS
- $_$
-    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
-    SELECT cyanaudit.fn_label_transaction( in_label, in_txid );
- $_$
-    language sql;
-
-COMMENT ON FUNCTION cyanaudit.fn_label_audit_transaction( varchar, bigint )
-    IS 'Deprecated and will soon be removed. Use fn_label_transaction().';
-
-
-
 -- fn_label_last_transaction
 CREATE OR REPLACE FUNCTION cyanaudit.fn_label_last_transaction
 (
@@ -304,22 +235,6 @@ returns void as
 COMMENT ON FUNCTION cyanaudit.fn_label_last_transaction( varchar )
     IS 'Shorthand for: fn_label_last_transaction( in_label, cyanaudit.fn_get_last_txid() )';
 
-
--- fn_label_last_audit_transaction
-CREATE OR REPLACE FUNCTION cyanaudit.fn_label_last_audit_transaction
-(
-    in_label    varchar
-)
-returns void AS
- $_$
-    -- THIS FUNCTION IS DEPRECATED AND WILL SOON BE REMOVED INSTEAD USE:
-
-    SELECT cyanaudit.fn_label_last_transaction( in_label );
- $_$
-    language sql;
-
-COMMENT ON FUNCTION cyanaudit.fn_label_last_audit_transaction( varchar )
-    IS 'Deprecated and will soon be removed. Use fn_label_last_transaction()';
 
 
 
@@ -350,6 +265,7 @@ begin
 end
  $_$
     language plpgsql strict;
+
 
 
 -- fn_undo_last_transaction
@@ -445,16 +361,15 @@ COMMENT ON FUNCTION cyanaudit.fn_update_audit_fields( varchar )
 
 ---- INTERNAL UTILITY FUNCTIONS ----
 
--- fn_set_last_txid
-CREATE OR REPLACE FUNCTION cyanaudit.fn_set_last_txid
-(
-    bigint default txid_current()
-)
-returns bigint
-language sql strict
-as $_$
-    SELECT (set_config('cyanaudit._last_txid', $1::varchar, false))::bigint;
- $_$;
+-- fn_is_installed_as_extension
+CREATE OR REPLACE FUNCTION cyanaudit.fn_is_installed_as_extension()
+returns boolean 
+language sql as
+$_$
+    select count(*) > 0
+      from pg_extension 
+     where extname = 'cyanaudit';
+$_$;
 
 
 -- fn_get_email_by_uid
@@ -472,13 +387,21 @@ declare
     my_user_table           varchar;
     my_user_table_email_col varchar;
 begin
-    select cyanaudit.fn_get_config('user_table'),
-           cyanaudit.fn_get_config('user_table_uid_col'),
-           cyanaudit.fn_get_config('user_table_email_col')
-      into my_user_table,
-           my_user_table_uid_col,
-           my_user_table_email_col;
-
+    select value
+      into my_user_table
+      from cyanaudit.tb_config
+     where name = 'user_table';
+     
+    select value
+      into my_user_table_uid_col
+      from cyanaudit.tb_config
+     where name = 'user_table_uid_col';
+     
+    select value
+      into my_user_table_email_col
+      from cyanaudit.tb_config
+     where name = 'user_table_email_col';
+     
     if my_user_table            IS NULL OR
        my_user_table_uid_col    IS NULL OR
        my_user_table_email_col  IS NULL
@@ -486,9 +409,9 @@ begin
         return null;
     end if;
 
-    my_query := 'select ' || quote_ident(my_user_table_email_col)
-             || '  from ' || quote_ident(my_user_table)
-             || ' where ' || quote_ident(my_user_table_uid_col)
+    my_query := 'SELECT ' || quote_ident(my_user_table_email_col)
+             || '  FROM ' || quote_ident(my_user_table)
+             || ' WHERE ' || quote_ident(my_user_table_uid_col)
                           || ' = ' || quote_nullable(in_uid);
     execute my_query
        into my_email;
@@ -506,6 +429,7 @@ end
  $_$;
 
 
+
 -- fn_get_uid_by_username
 CREATE OR REPLACE FUNCTION cyanaudit.fn_get_uid_by_username
 (
@@ -521,13 +445,21 @@ declare
     my_user_table               varchar;
     my_user_table_username_col  varchar;
 begin
-    select cyanaudit.fn_get_config('user_table'),
-           cyanaudit.fn_get_config('user_table_uid_col'),
-           cyanaudit.fn_get_config('user_table_username_col')
-      into my_user_table,
-           my_user_table_uid_col,
-           my_user_table_username_col;
-
+    select value
+      into my_user_table
+      from cyanaudit.tb_config
+     where name = 'user_table';
+     
+    select value
+      into my_user_table_uid_col
+      from cyanaudit.tb_config
+     where name = 'user_table_uid_col';
+     
+    select value
+      into my_user_table_username_col
+      from cyanaudit.tb_config
+     where name = 'user_table_username_col';
+     
     if my_user_table                IS NULL OR
        my_user_table_uid_col        IS NULL OR
        my_user_table_username_col   IS NULL
@@ -662,12 +594,17 @@ end
     language 'plpgsql';
 
 
--- fn_log_audit_event
+
+-----------------------
+------ TRIGGERS -------
+-----------------------
+
+-- fn_log_audit_event (MAIN LOGGING TRIGGER FUNCTION)
 CREATE OR REPLACE FUNCTION cyanaudit.fn_log_audit_event()
  RETURNS trigger
  LANGUAGE plpgsql
 AS $_$
-DECLARE
+declare
     my_audit_fields         varchar[];
     my_audit_field          integer;
     my_column_names         varchar[];
@@ -680,7 +617,8 @@ DECLARE
     my_old_value            text;
     my_new_value            text;
     my_clock_timestamp      timestamp;
-BEGIN
+    my_enabled              text;
+begin
     if( TG_OP = 'INSERT' ) then
         my_new_row := NEW;
         my_old_row := NEW;
@@ -692,7 +630,9 @@ BEGIN
         my_old_row := OLD;
     end if;
 
-    if cyanaudit.fn_get_config('enabled') = '0' then
+    my_enabled := current_setting( 'cyanaudit.enabled', true );
+
+    if my_enabled = '0' or my_enabled = 'false' or my_enabled = 'f' then
         return my_new_row;
     end if;
 
@@ -702,79 +642,83 @@ BEGIN
 
     my_clock_timestamp  := clock_timestamp(); -- same for all entries from this invocation
 
-    perform cyanaudit.fn_set_last_txid();
+    -- Bookmark this txid in cyanaudit._last_txid
+    perform (set_config('cyanaudit._last_txid', txid_current()::text, false))::bigint;
 
     -- Given:  my_pk_cols::varchar[]           = ARRAY[ 'column foo',bar ]
     -- Result: my_pk_vals_constructor::varchar = 'select ARRAY[ $1."column foo", $1.bar ]::varchar[]'
-    select 'select ARRAY[' || string_agg( '$1.' || quote_ident(pk_col), ',' ) || ']::varchar[]'
+    select 'SELECT ARRAY[' || string_agg( '$1.' || quote_ident(pk_col), ',' ) || ']::varchar[]'
       into my_pk_vals_constructor
       from ( select unnest(my_pk_cols::varchar[]) as pk_col ) x;
 
     -- Execute the result using my_new_row in $1 to produce the following result:
     -- my_pk_vals::varchar[] = ARRAY[ 'val1', 'val2' ]
-    EXECUTE my_pk_vals_constructor
+    execute my_pk_vals_constructor
        into my_pk_vals
       using my_new_row; -- To allow undoing updates to pk columns, logged pk_vals are post-update.
 
-    FOR my_column_name, my_audit_field in
+    for my_column_name, my_audit_field in
         select unnest( my_column_names::varchar[] ),
                unnest( my_audit_fields::varchar[] )
-    LOOP
-        IF TG_OP = 'INSERT' THEN
+    loop
+        if TG_OP = 'INSERT' THEN
             EXECUTE format('select null::text, $1.%I::text', my_column_name)
                INTO my_old_value, my_new_value
               USING my_new_row;
 
             CONTINUE when my_new_value is null;
 
-        ELSIF TG_OP = 'UPDATE' THEN
+        elsif TG_OP = 'UPDATE' THEN
             EXECUTE format( 'select $1.%1$I::text, $2.%1$I::text', my_column_name)
                INTO my_old_value, my_new_value
               USING my_old_row, my_new_row;
 
             CONTINUE when my_old_value is not distinct from my_new_value;
 
-        ELSIF TG_OP = 'DELETE' THEN
+        elsif TG_OP = 'DELETE' THEN
             EXECUTE format('select $1.%I::text, null::text', my_column_name)
                INTO my_old_value, my_new_value
               USING my_old_row;
 
             CONTINUE when my_old_value is null;
 
-        END IF;
+        end if;
 
-        EXECUTE format( 'INSERT INTO cyanaudit.tb_audit_event '
+
+        execute format( 'INSERT INTO cyanaudit.tb_audit_event '
                      || '( audit_field, recorded, pk_vals, uid, row_op, old_value, new_value ) '
                      || 'VALUES(  $1, $2, $3, $4, $5::char(1), $6, $7 ) ',
                         my_column_name
                       )
-          USING my_audit_field,
+          using my_audit_field,
                 my_clock_timestamp,
                 my_pk_vals,
                 cyanaudit.fn_get_current_uid(),
                 TG_OP,
                 my_old_value,
                 my_new_value;
-    END LOOP;
+    end loop;
 
-    RETURN NEW;
-EXCEPTION
-    WHEN undefined_function THEN
+    return new;
+exception
+    when undefined_object then
+         return my_new_row;
+    when undefined_function then
          raise notice 'cyanaudit: Missing internal function. Please reinstall.';
-         return NEW;
-    WHEN undefined_column THEN
+         return my_new_row;
+    when undefined_column then
          raise notice 'cyanaudit: Attempt to log deleted column. Please run cyanaudit.fn_update_audit_fields() as superuser.';
-         return NEW;
-    WHEN insufficient_privilege THEN
+         return my_new_row;
+    when insufficient_privilege then
          raise notice 'cyanaudit: Incorrect permissions. Operation not logged';
-         return NEW;
-    WHEN foreign_key_violation THEN
+         return my_new_row;
+    when foreign_key_violation then
          raise notice 'cyanaudit: Invalid configuration. Please re-run fn_update_audit_fields().';
-         return NEW;
-    WHEN others THEN
-         raise notice 'cyanaudit: Unknown exception. Operation not logged';
-         return NEW;
-END
+         return my_new_row;
+    when others then
+         raise notice 'cyanaudit: Unknown exception %: %. Operation not logged', SQLSTATE, SQLERRM;
+         return my_new_row;
+end
 $_$;
 
 COMMENT ON FUNCTION cyanaudit.fn_log_audit_event()
@@ -784,10 +728,6 @@ COMMENT ON FUNCTION cyanaudit.fn_log_audit_event()
 
 
 
-
------------------------
------- TRIGGERS -------
------------------------
 
 -- fn_before_audit_field_change
 CREATE OR REPLACE FUNCTION cyanaudit.fn_before_audit_field_change()
@@ -972,6 +912,7 @@ returns void as
     language sql;
 
 
+
 CREATE OR REPLACE FUNCTION cyanaudit.fn_remove_trigger_from_extension
 (
     in_table_schema varchar,
@@ -1036,13 +977,15 @@ begin
        from pg_event_trigger
       where evtname = 'tr_update_audit_fields';
 
-    IF NOT FOUND THEN
+    if not found then
         CREATE EVENT TRIGGER tr_update_audit_fields ON ddl_command_end
             WHEN TAG IN ('ALTER TABLE', 'CREATE TABLE', 'DROP TABLE')
             EXECUTE PROCEDURE cyanaudit.fn_update_audit_fields_event_trigger();
 
-        ALTER EXTENSION cyanaudit ADD EVENT TRIGGER tr_update_audit_fields;
-    END IF;
+        if cyanaudit.fn_is_installed_as_extension() then
+            ALTER EXTENSION cyanaudit ADD EVENT TRIGGER tr_update_audit_fields;
+        end if;
+    end if;
 end;
  $_$;
 
@@ -1156,7 +1099,9 @@ begin
                  || '   TO public ',
                     in_new_table_name );
 
-    execute format( 'ALTER EXTENSION cyanaudit ADD TABLE cyanaudit.%I', in_new_table_name );
+    if cyanaudit.fn_is_installed_as_extension() then
+        execute format( 'ALTER EXTENSION cyanaudit ADD TABLE cyanaudit.%I', in_new_table_name );
+    end if;
 
     SET LOCAL client_min_messages to NOTICE;
 
@@ -1434,7 +1379,15 @@ declare
     my_archive_tablespace   varchar;
     my_index_name           varchar;
 begin
-    my_archive_tablespace := cyanaudit.fn_get_config( 'archive_tablespace' );
+    select archive_tablespace
+      into my_archive_tablespace
+      from cyanaudit.tb_config c
+      join pg_tablespace t
+        on c.value = t.spcname::text;
+
+    if not found then
+        raise exception 'cyanaudit: Missing or invalid config value for ''archive_tablespace''. Aborting.';
+    end if;
 
     for my_index_name in
         select ci.relname
@@ -1455,9 +1408,6 @@ begin
 
     execute format( 'alter table cyanaudit.%I set tablespace %I',
                     in_partition_name, my_archive_tablespace );
-exception
-    when undefined_object then
-        raise exception 'cyanaudit: Missing setting for cyanaudit.archive_tablespace. Aborting.';
 end
  $_$
     language plpgsql strict;
@@ -1467,7 +1417,7 @@ end
 CREATE OR REPLACE FUNCTION cyanaudit.fn_prune_archive
 (
     in_keep_qty         integer,
-    in_keep_interval    interval default null,
+    in_keep_age         interval default null,
     in_keep_size_gb     integer default null
 )
 returns setof varchar as
@@ -1480,13 +1430,15 @@ begin
     end if;
 
     for my_table_name in
-        select cyanaudit.fn_get_partitions_over_quantity_limit( in_keep_qty );
+        select cyanaudit.fn_get_partitions_over_quantity_limit( in_keep_qty )
          UNION
         select cyanaudit.fn_get_partitions_over_size_limit( in_keep_size_gb )
          UNION
-        select cyanaudit.fn_get_partitions_older_than_interval( in_keep_interval );
+        select cyanaudit.fn_get_partitions_over_age_limit( in_keep_age )
     loop
-        execute format( 'ALTER EXTENSION cyanaudit DROP TABLE cyanaudit.%I', my_table_name );
+        if cyanaudit.fn_is_installed_as_extension() then
+            execute format( 'ALTER EXTENSION cyanaudit DROP TABLE cyanaudit.%I', my_table_name );
+        end if;
         execute format( 'DROP TABLE cyanaudit.%I', my_table_name );
         return next my_table_name;
     end loop;
@@ -1515,7 +1467,52 @@ returns setof text as
     language sql strict;
 
 
-CREATE OR REPLACE FUNCTION cyanaudit.fn_get_partitions_over_size_limit( in_size_gb
+CREATE OR REPLACE FUNCTION cyanaudit.fn_get_partitions_over_size_limit
+( 
+    in_size_gb bigint
+)
+returns setof text as
+ $_$
+    with tt_cumulative_size as
+    (
+        select c.relname::text,
+               sum( pg_total_relation_size(c.oid) ) 
+                over( order by c.relname desc rows unbounded preceding )
+          from pg_class c
+          join pg_namespace n
+            on c.relnamespace = n.oid
+         where n.nspname = 'cyanaudit'
+           and c.relname like 'tb_audit_event_%'
+    )
+    select relname
+      from tt_cumulative_size
+     where sum > in_size_gb * 1000000000::bigint
+  order by relname;
+ $_$
+    language sql strict;
+
+
+CREATE OR REPLACE FUNCTION fn_get_partitions_over_age_limit
+(
+    in_age  interval
+)
+returns setof text as
+ $_$
+    with tt_partitions as
+    (
+        select c.relname::text as considered_partition_name,
+               lead(c.relname) over( order by c.relname ) as next_partition_name
+          from pg_class c
+          join pg_namespace n
+            on c.relnamespace = n.oid
+         where n.nspname = 'cyanaudit'
+           and c.relname like 'tb_audit_event_%'
+    )
+    select considered_partition_name
+      from tt_partitions
+     where next_partition_name < 'tb_audit_event_' || to_char( now() - in_age, 'YYYYMMDD_HH24MI' );
+ $_$
+    language sql strict;
 
 --------------------
 ------ VIEWS -------
@@ -1588,52 +1585,25 @@ COMMENT ON VIEW cyanaudit.vw_undo_statement
     IS 'Reconstructed SQL statements that can be used to play a transaction''s DML in reverse.';
 
 
+---------------------
+--- CONFIG TABLES ---
+---------------------
 
+do language plpgsql
+$$
+begin
+    if( cyanaudit.fn_is_installed_as_extension() ) then
+        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_field','');
+        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_field','');
 
--- vw_audit_transaction_statement
--- DEPRECATED. DO NOT USE.
--- Not accurate for updates to pk columns (WHERE lists new PK, not old)
-CREATE OR REPLACE VIEW cyanaudit.vw_audit_transaction_statement as
-   select ae.txid,
-          (case ae.row_op
-           when 'I' then
-                format( 'INSERT INTO %I.%I ( %s ) values ( %s );',
-                        af.table_schema,
-                        af.table_name,
-                        string_agg( quote_ident( af.column_name ), ',' ),
-                        string_agg( quote_nullable( ae.new_value ), ',' )
-                      )
-          when 'U' then
-                format( 'UPDATE %I.%I SET %s WHERE %s;',
-                        af.table_schema,
-                        af.table_name,
-                        string_agg( format( '%I = %L', af.column_name, ae.new_value ), ',' ),
-                        cyanaudit.fn_get_where_string(
-                            cyanaudit.fn_get_table_pk_cols( af.table_name, af.table_schema ),
-                            ae.pk_vals
-                        )
-                      )
-          when 'D' then
-                format( 'DELETE FROM %I.%I WHERE %s;',
-                        af.table_schema,
-                        af.table_name,
-                        cyanaudit.fn_get_where_string(
-                            cyanaudit.fn_get_table_pk_cols( af.table_name, af.table_schema ),
-                            ae.pk_vals
-                        )
-                      )
-          end)::varchar as query
-     from cyanaudit.tb_audit_event ae
-     join cyanaudit.tb_audit_field af using(audit_field)
-left join cyanaudit.tb_audit_transaction_type att using(audit_transaction_type)
- group by af.table_schema, af.table_name, ae.row_op,
-          ae.pk_vals, ae.txid, ae.recorded, att.label,
-          cyanaudit.fn_get_email_by_uid(ae.uid),
-          cyanaudit.fn_get_table_pk_cols(af.table_name, af.table_schema)
- order by ae.recorded;
+        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_transaction_type','');
+        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_transaction_type','');
 
-COMMENT ON VIEW cyanaudit.vw_audit_transaction_statement
-    IS 'Deprecated. Do not use. Statements are not correct for updates to pk columns.';
+        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_config','');
+    end if;
+end;
+$$;
+
 
 
 
@@ -1654,4 +1624,3 @@ grant  insert,
        select (audit_transaction_type, txid),
        update (audit_transaction_type)
        on cyanaudit.tb_audit_event              to public;
-

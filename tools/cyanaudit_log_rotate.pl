@@ -25,7 +25,9 @@ sub usage
         . "  -p port    database server port\n"
         . "  -U user    database user name\n"
         . "  -d db      database name\n"
-        . "  -n #       number of archived log partitions to keep\n";
+        . "  -n #       max number (count) of partitions after pruning\n"
+        . "  -s #       max size (gb) of logs after pruning\n"
+        . "  -a #       max age (days) of logs after pruning\n";
 
     exit 1;
 }
@@ -73,10 +75,10 @@ if( $old_table_name )
 
 print "Done.\n";
 
-if( $opts{'n'} )
+if( $opts{'n'} or $opts{'s'} or $opts{'a'} )
 {
-    my $archive_q = "select $schema.fn_prune_archive( $opts{'n'} )";
-    my $tables = $handle->selectcol_arrayref( $archive_q ) or die;
+    my $archive_q = "select $schema.fn_prune_archive( ?, ?, ? )";
+    my $tables = $handle->selectcol_arrayref( $archive_q, undef, $opts{'n'}, $opts{'a'}, $opts{'s'} ) or die;
 
     if( @$tables )
     {

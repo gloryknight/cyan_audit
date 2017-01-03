@@ -1,3 +1,12 @@
+1.0.2 -> 1.1.0
+--------------
+- Removed the need for database-level GUCs (for compatibility with Amazon RDS).
+- Added sql/noext with Makefile to generate sql script to install without
+  creating an extension (for compatibility with Amazon RDS).
+- Removed various deprecated functions
+- cyanaudit_log_rotate.pl can now prune logs based on max age and size as well
+  as previous functionality of max number of partitions.
+
 1.0.1 -> 1.0.2
 --------------
 - Order of operations in fn_archive_partition changed to reduce duration of

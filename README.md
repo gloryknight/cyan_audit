@@ -21,8 +21,8 @@ Cyan Audit:
 
 * is written entirely in SQL and PL/pgSQL (except Perl cron scripts).
 * is Trigger-based.
-* supports PostgreSQL 9.3 and newer.
-* has been production tested for 4 years.
+* supports PostgreSQL 9.6 and newer.
+* has been production tested since 2012.
 
 For installation and usage instructions please see doc/cyanaudit.md.
 

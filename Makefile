@@ -19,10 +19,10 @@ tags:
 ### Verify required version ###
 ###############################
 
-PGREQVER     = $(shell $(PG_CONFIG) --version | grep -qE " 8\\.| 9\\.[012]| 9\\.3\\.[0-2]\>" && echo no || echo yes)
+PGREQVER     = $(shell $(PG_CONFIG) --version | grep -qE " 8\\.| 9\\.[012345]" && echo no || echo yes)
 
 ifeq ($(PGREQVER),no)
-$(error "Cyan Audit requires PostgreSQL 9.3.3 or above")
+$(error "Cyan Audit requires PostgreSQL 9.6.0 or above")
 endif
 
 
