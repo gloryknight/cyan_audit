@@ -20,7 +20,6 @@ use vars qw( @ISA @EXPORT );
     db_connect
     md5_write
     md5_verify
-    get_cyanaudit_schema
     get_cyanaudit_data_table_list
     get_file_mtime_local
 );
@@ -110,29 +109,4 @@ sub get_file_mtime_local($)
     my $mtime_local = timegm( localtime($mtime) );
 
     return $mtime_local;
-}
-
-sub get_cyanaudit_schema($)
-{
-    my( $handle ) = @_;
-
-    state $schema;
-
-    unless( $schema )
-    {
-        my $schema_q = <<SQL;
-            select n.nspname
-              from pg_extension e
-              join pg_namespace n
-                on e.extnamespace = n.oid
-             where e.extname = 'cyanaudit'
-SQL
-
-        my $schema_row = $handle->selectrow_arrayref($schema_q)
-            or return undef;
-
-        $schema = $schema_row->[0];
-    }
-
-    return $schema;
 }

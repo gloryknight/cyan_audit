@@ -831,7 +831,10 @@ begin
         and tgname = 'tr_log_audit_event';
 
     IF FOUND THEN
-        -- perform @extschema@.fn_remove_trigger_from_extension( NEW.table_schema, NEW.table_name );
+        if @extschema@.fn_is_installed_as_extension() then
+            perform @extschema@.fn_remove_trigger_from_extension( NEW.table_schema, NEW.table_name );
+        end if;
+
         execute format( 'DROP TRIGGER tr_log_audit_event ON %I.%I',
                         NEW.table_schema, NEW.table_name );
     END IF;
@@ -860,7 +863,9 @@ begin
                         my_audit_fields,
                         my_column_names
                       );
-        -- perform @extschema@.fn_add_trigger_to_extension( NEW.table_schema, NEW.table_name );
+        if @extschema@.fn_is_installed_as_extension() then
+            perform @extschema@.fn_add_trigger_to_extension( NEW.table_schema, NEW.table_name );
+        end if;
     END IF;
 
     return NEW;
@@ -873,7 +878,6 @@ CREATE TRIGGER tr_after_audit_field_change
 
 
 
-/*
 CREATE OR REPLACE FUNCTION @extschema@.fn_add_trigger_to_extension
 (
     in_table_schema varchar,
@@ -945,7 +949,6 @@ returns void as
      WHERE row(d.*) = row(tt.*);
  $_$
     language sql;
-*/
 
 
 
@@ -1379,14 +1382,16 @@ declare
     my_archive_tablespace   varchar;
     my_index_name           varchar;
 begin
-    select archive_tablespace
+    select c.value
       into my_archive_tablespace
       from @extschema@.tb_config c
       join pg_tablespace t
-        on c.value = t.spcname::text;
+        on c.value = t.spcname::text
+     where c.name = 'archive_tablespace';
 
     if not found then
-        raise exception 'cyanaudit: Missing or invalid config value for ''archive_tablespace''. Aborting.';
+        raise notice 'cyanaudit: Missing or invalid config value for ''archive_tablespace''. Aborting.';
+        return;
     end if;
 
     for my_index_name in

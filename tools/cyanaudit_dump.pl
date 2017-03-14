@@ -51,8 +51,7 @@ chdir( $outdir ) or die "Could not chdir($outdir): $!\n";
 my $handle = db_connect( \%opts ) 
     or die "Could not connect to database: $DBI::errstr\n";;
 
-my $schema = get_cyanaudit_schema($handle)
-    or die "Could not find Cyan Audit in given database.\n";
+my $schema = 'cyanaudit';
 
 print "Found Cyan Audit in schema '$schema'.\n";
 

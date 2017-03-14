@@ -45,8 +45,7 @@ my $handle = db_connect( \%opts ) or die "Database connect error.\n";
 
 ### Find cyanaudit schema
 
-my $schema = get_cyanaudit_schema($handle)
-    or die "Could not determine audit log schema\n";
+my $schema = 'cyanaudit';
 
 print "Found cyanaudit in schema '$schema'\n";
 
@@ -70,7 +69,7 @@ $handle->do( "select $schema.fn_activate_partition( ? )", undef, $table_name );
 if( $old_table_name )
 {
     $handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $old_table_name );
-    $handle->do( "select $schema.fn_archive_partition( ? )", undef, $old_table_name );
+    $handle->do( "select $schema.fn_archive_partition( ? )", undef, $old_table_name ) or die;
 }
 
 print "Done.\n";
@@ -78,7 +77,8 @@ print "Done.\n";
 if( $opts{'n'} or $opts{'s'} or $opts{'a'} )
 {
     my $archive_q = "select $schema.fn_prune_archive( ?, ?, ? )";
-    my $tables = $handle->selectcol_arrayref( $archive_q, undef, $opts{'n'}, $opts{'a'}, $opts{'s'} ) or die;
+    my $tables = $handle->selectcol_arrayref( $archive_q, undef, $opts{'n'}, $opts{'a'}, $opts{'s'} ) 
+        or die "Could not drop old audit log partition(s).\n";
 
     if( @$tables )
     {

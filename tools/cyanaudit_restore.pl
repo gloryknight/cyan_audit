@@ -70,7 +70,7 @@ sub build_db_row_from_csv_row($$)
         return undef if( $csv_row->{'old_value'} eq $csv_row->{'new_value'} );
     }
 
-    my $schema = get_cyanaudit_schema( $handle );
+    my $schema = 'cyanaudit';
     
     state $audit_field_q = "select $schema.fn_get_or_create_audit_field(?,?,?)";
     state $audit_field_sth = $handle->prepare($audit_field_q);
