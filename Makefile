@@ -11,7 +11,7 @@ BINDIR := $(shell $(PG_CONFIG) --bindir)
 
 install:
 	mkdir -p $(BINDIR)
-	cp -v $(SCRIPTS)/* $(BINDIR)
+	cp -v $(SCRIPTS) $(BINDIR)
 
 tags:
 	ctags -f .tags -h ".pm" -R .
