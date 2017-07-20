@@ -2,6 +2,3 @@
     - table sizes
     - %-breakdown of logging by column
 - cron job to email the report
-- Handle foreign key violation exception by asking user to re-run
-  fn_update_audit_fields()
-- Improve log rotation script to specify max size or max number of days.

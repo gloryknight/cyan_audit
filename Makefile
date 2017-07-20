@@ -1,6 +1,5 @@
 EXTENSION    = cyanaudit
-EXTVERSION   = $(shell grep default_version $(EXTENSION).control | \
-               sed -e "s/default_version[[:space:]]*=[[:space:]]*'\\([^']*\\)'/\\1/")
+EXTVERSION   = 2.0
 
 DOCS         = $(wildcard doc/*.md)
 SCRIPTS      = $(wildcard tools/*.p[lm]) $(wildcard tools/*.sh)
@@ -8,8 +7,11 @@ SCRIPTS      = $(wildcard tools/*.p[lm]) $(wildcard tools/*.sh)
 PG_CONFIG    = pg_config
 DATA         = $(wildcard sql/$(EXTENSION)--*--*.sql) sql/$(EXTENSION)--$(EXTVERSION).sql
 
-PGXS := $(shell $(PG_CONFIG) --pgxs)
-include $(PGXS)
+BINDIR := $(shell $(PG_CONFIG) --bindir)
+
+install:
+	mkdir -p $(BINDIR)
+	cp -v $(SCRIPTS)/* $(BINDIR)
 
 tags:
 	ctags -f .tags -h ".pm" -R .
@@ -19,10 +21,10 @@ tags:
 ### Verify required version ###
 ###############################
 
-PGREQVER     = $(shell $(PG_CONFIG) --version | grep -qE " 8\\.| 9\\.[012345]" && echo no || echo yes)
+PGREQVER     = $(shell $(PG_CONFIG) --version | grep -qE " 8\\.| 9\\.[012345]\>" && echo no || echo yes)
 
 ifeq ($(PGREQVER),no)
-$(error "Cyan Audit requires PostgreSQL 9.6.0 or above")
+$(error "Cyan Audit requires PostgreSQL 9.6 or above")
 endif
 
 
@@ -30,7 +32,7 @@ endif
 #############################
 ### Packaging for release ###
 #############################
-PKGFILES     = cyanaudit.control LICENSE README.md Makefile META.json $(DATA) $(DOCS) $(SCRIPTS)
+PKGFILES     = LICENSE README.md Makefile META.json $(DATA) $(DOCS) $(SCRIPTS)
 
 PKGNAME      = $(EXTENSION)-$(EXTVERSION)
 PKG_TGZ      = dist/$(PKGNAME).tar.gz

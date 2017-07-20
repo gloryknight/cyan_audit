@@ -24,9 +24,6 @@ psql -t -A -c "
      from pg_class c
      join pg_namespace n
        on c.relnamespace = n.oid
-     join pg_extension e
-       on e.extnamespace = n.oid
-      and e.extname = 'cyanaudit'
 left join pg_tablespace t
        on c.reltablespace = t.oid
     where t.spcname is distinct from current_setting('cyanaudit.archive_tablespace')

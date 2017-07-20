@@ -1,7 +1,7 @@
 Cyan Audit
 ==========
 
-Cyan Audit is a PostgreSQL extension providing comprehensive and
+Cyan Audit is a PostgreSQL utility providing comprehensive and
 easily-searchable logs of DML (INSERT/UPDATE/DELETE) activity in your database.
 
 With Cyan Audit you can:

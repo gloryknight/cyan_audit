@@ -1,5 +1,4 @@
 #!/usr/bin/perl -w
-# TODO: Dropping old tables
 
 use strict;
 
@@ -25,9 +24,10 @@ sub usage
         . "  -p port    database server port\n"
         . "  -U user    database user name\n"
         . "  -d db      database name\n"
-        . "  -n #       max number (count) of partitions after pruning\n"
-        . "  -s #       max size (gb) of logs after pruning\n"
-        . "  -a #       max age (days) of logs after pruning\n";
+        . "  -p         prune only, do not rotate\n"
+        . "  -n #       max number (count) of partitions to keep after pruning\n"
+        . "  -s #       max size (gb) of logs to keep after pruning\n"
+        . "  -a #       max age (days) of logs to keep after pruning\n";
 
     exit 1;
 }
@@ -43,37 +43,62 @@ unless( $opts{'n'} and $opts{'n'} =~ /^\d+$/ )
 
 my $handle = db_connect( \%opts ) or die "Database connect error.\n";
 
-### Find cyanaudit schema
-
+### cyanaudit is no longer relocatable
 my $schema = 'cyanaudit';
 
-print "Found cyanaudit in schema '$schema'\n";
-
-
-my ($old_table_name) = $handle->selectrow_array( "select $schema.fn_get_active_partition_name()" );
-my ($table_name) = $handle->selectrow_array( "select $schema.fn_create_new_partition()" ) or die; 
-
-unless( $table_name )
+################
+### ROTATING ###
+################
+unless( $opts{'p'} )
 {
-    die "No events to rotate. Exiting.\n";
+    my ($old_table_name) = $handle->selectrow_array( "select $schema.fn_get_active_partition_name()" );
+    my ($table_name) = $handle->selectrow_array( "select $schema.fn_create_new_partition()" ) or die; 
+
+    # xmax is the first as-yet-unassigned txid. All txids greater than or equal
+    # to this are not yet started as of the time of the snapshot, and thus invisible.
+    my ($xmax) = $handle->selectrow_array( "select txid_snapshot_xmax( txid_current_snapshot() )" ) or die;
+
+    unless( $table_name )
+    {
+        die "No events to rotate. Exiting.\n";
+    }
+
+    print "Created new archive table $schema.$table_name.\n";
+
+    print "Finalizing indexes and constraints... ";
+    $handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $table_name );
+    $handle->do( "select $schema.fn_create_partition_indexes( ? )", undef, $table_name );
+    $handle->do( "select $schema.fn_setup_partition_inheritance( ? )", undef, $table_name );
+    $handle->do( "select $schema.fn_activate_partition( ? )", undef, $table_name );
+
+    # Initialize xmin
+    my $xmin = $xmax - 1;
+
+    # Loop until xmin, the earliest txid that is still active, is not less than
+    # the previous xmax value, meaning all transactions have completed. This is
+    # to prevent attempts to label a transaction while that transaction's table
+    # partition is being exclusively locked for the next steps.
+    until( $xmin >= $xmax )
+    {
+        ($xmin) = $handle->selectrow_array( "select txid_snapshot_xmin( txid_current_snapshot() )" ) or die;
+    }
+
+    # Give finished transactions a chance to be labeled using
+    # fn_label_last_transaction().
+    sleep(5);
+    
+    if( $old_table_name )
+    {
+        $handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $old_table_name );
+        $handle->do( "select $schema.fn_archive_partition( ? )", undef, $old_table_name ) or die;
+    }
+
+    print "Done.\n";
 }
 
-print "Created new archive table $schema.$table_name.\n";
-
-print "Finalizing indexes and constraints... ";
-$handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $table_name );
-$handle->do( "select $schema.fn_create_partition_indexes( ? )", undef, $table_name );
-$handle->do( "select $schema.fn_setup_partition_inheritance( ? )", undef, $table_name );
-$handle->do( "select $schema.fn_activate_partition( ? )", undef, $table_name );
-
-if( $old_table_name )
-{
-    $handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $old_table_name );
-    $handle->do( "select $schema.fn_archive_partition( ? )", undef, $old_table_name ) or die;
-}
-
-print "Done.\n";
-
+###############
+### PRUNING ###
+###############
 if( $opts{'n'} or $opts{'s'} or $opts{'a'} )
 {
     my $archive_q = "select $schema.fn_prune_archive( ?, ?, ? )";

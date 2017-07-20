@@ -1,11 +1,19 @@
-1.0.2 -> 1.1.0
---------------
+1.0.2 -> 2.0
+------------
+- Cyan Audit is no longer an extension. Just run the .sql script to install. All
+  code is installed to cyanaudit schema and is not relocatable. This is to
+  support Amazon RDS.
 - Removed the need for database-level GUCs (for compatibility with Amazon RDS).
-- Added sql/noext with Makefile to generate sql script to install without
-  creating an extension (for compatibility with Amazon RDS).
 - Removed various deprecated functions
-- cyanaudit_log_rotate.pl can now prune logs based on max age and size as well
-  as previous functionality of max number of partitions.
+- cyanaudit_log_rotate.pl now has -p flag to prune without rotating.
+- cyanaudit_log_rotate.pl now offers rotation by size and age as well as number.
+- cyanaudit_log_rotate.pl now waits for in-flight transactions to finish before
+  modifying the constraints or table spaces of archived partitions, so as to
+  allow transactions to be labeled before locking the partition in which the
+  transaction data resides.
+- Added function fn_set_transaction_label() to set the label of a transaction
+  for future actions in the transaction. This avoids the need to call
+  fn_label_transaction() or fn_label_last_transaction() after DML.
 
 1.0.1 -> 1.0.2
 --------------
