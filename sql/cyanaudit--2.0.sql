@@ -1672,4 +1672,7 @@ grant  insert,
        update (audit_transaction_type)
        on cyanaudit.tb_audit_event              to public;
 
+grant  select
+       on cyanaudit.tb_config                   to public;
+
 SELECT cyanaudit.fn_create_event_trigger();
