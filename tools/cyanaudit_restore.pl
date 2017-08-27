@@ -161,10 +161,7 @@ foreach my $file (@ARGV)
 my $handle = db_connect( \%opts )
     or die "Could not connect to database: $DBI::errstr\n";
 
-my $schema = get_cyanaudit_schema( $handle )
-    or die "Could not find cyanaudit in given database";
-
-print "Found Cyan Audit in schema '$schema'\n";
+my $schema = 'cyanaudit';
 
 $handle->do( "SELECT $schema.fn_verify_partition_config()" );
 

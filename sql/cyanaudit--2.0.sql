@@ -1231,9 +1231,6 @@ begin
                           );
         end if;
     end loop;
-exception
-    when undefined_object then
-        raise exception 'cyanaudit: Missing setting for cyanaudit.archive_tablespace. Aborting.';
 end
  $_$
     language plpgsql;
@@ -1651,6 +1648,7 @@ VALUES ('user_table', null),
        ('user_table_username_col', null),
        ('user_table_email_col', null),
        ('user_table_uid_col', null),
+       ('archive_tablespace', 'pg_default'),
        ('version', '2.0')
 ON CONFLICT DO NOTHING;
 
