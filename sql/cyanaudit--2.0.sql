@@ -167,7 +167,10 @@ CREATE OR REPLACE FUNCTION cyanaudit.fn_get_last_txid()
 returns bigint
 language sql stable
 as $_$
-    select current_setting( 'cyanaudit.last_txid', true )::bigint;
+    select case when current_setting( 'cyanaudit.last_txid', true ) ~ '^\d+$'
+                then current_setting( 'cyanaudit.last_txid' )
+                else null
+           end::bigint;
  $_$;
 
 
