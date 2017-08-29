@@ -5,6 +5,8 @@
  - Remove compatibility functions
 */
 
+BEGIN;
+
 ----- INITIAL SETUP -----
 do language plpgsql
  $$
@@ -734,6 +736,9 @@ exception
     when foreign_key_violation then
          raise notice 'cyanaudit: Invalid configuration. Please re-run fn_update_audit_fields().';
          return my_new_row;
+    when undefined_table then
+         raise notice 'cyanaudit: Missing log table. Run cyanaudit.fn_verify_paritition_config() or reinstall cyanaudit.';
+         return my_new_row;
     when others then
          raise notice 'cyanaudit: Unknown exception %: %. Operation not logged', SQLSTATE, SQLERRM;
          return my_new_row;
@@ -1381,7 +1386,13 @@ returns varchar as
 declare
     my_partition_name   varchar;
 begin
-    my_partition_name := cyanaudit.fn_get_active_partition_name();
+    select c.relname
+      into my_partition_name
+      from pg_class c
+      join pg_namespace n
+        on c.relnamespace = n.oid
+       and n.nspname = 'cyanaudit'
+     where c.relname = cyanaudit.fn_get_active_partition_name();
 
     if my_partition_name is null then
         my_partition_name := cyanaudit.fn_create_new_partition();
@@ -1626,31 +1637,20 @@ COMMENT ON VIEW cyanaudit.vw_undo_statement
 --- CONFIG TABLES ---
 ---------------------
 
-/*
-do language plpgsql
-$$
-begin
-    if( cyanaudit.fn_is_installed_as_extension() ) then
-        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_field','');
-        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_field','');
-
-        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_audit_transaction_type','');
-        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.sq_pk_audit_transaction_type','');
-
-        SELECT pg_catalog.pg_extension_config_dump('cyanaudit.tb_config','');
-    end if;
-end;
-$$;
-*/
-
 INSERT INTO cyanaudit.tb_config (name, value)
 VALUES ('user_table', null),
        ('user_table_username_col', null),
        ('user_table_email_col', null),
        ('user_table_uid_col', null),
-       ('archive_tablespace', 'pg_default'),
-       ('version', '2.0')
+       ('archive_tablespace', 'pg_default')
 ON CONFLICT DO NOTHING;
+
+
+INSERT INTO cyanaudit.tb_config (name, value)
+     VALUES ('version', '2.0')
+ON CONFLICT (name) DO UPDATE 
+        SET value = EXCLUDED.value 
+      WHERE cyanaudit.tb_config.name = EXCLUDED.name;
 
 -------------------
 --- PERMISSIONS ---
@@ -1674,3 +1674,5 @@ grant  select
        on cyanaudit.tb_config                   to public;
 
 SELECT cyanaudit.fn_create_event_trigger();
+
+COMMIT;
