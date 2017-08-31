@@ -1139,12 +1139,6 @@ begin
                  || '   TO public ',
                     in_new_table_name );
 
-    /*
-    if cyanaudit.fn_is_installed_as_extension() then
-        execute format( 'ALTER EXTENSION cyanaudit ADD TABLE cyanaudit.%I', in_new_table_name );
-    end if;
-    */
-
     SET LOCAL client_min_messages to NOTICE;
 
     return in_new_table_name;
@@ -1279,6 +1273,8 @@ begin
                         in_table_name, my_constraint_name );
     end if;
 
+    execute format( 'analyze cyanaudit.%I', in_table_name );
+
     execute format( 'select min(recorded), max(recorded), min(txid), max(txid) from cyanaudit.%I',
                     in_table_name )
        into my_min_recorded, my_max_recorded, my_min_txid, my_max_txid;
@@ -1399,10 +1395,10 @@ begin
 
     if my_partition_name is null then
         my_partition_name := cyanaudit.fn_create_new_partition();
-        perform cyanaudit.fn_create_partition_indexes( my_partition_name );
-        perform cyanaudit.fn_activate_partition( my_partition_name );
         perform cyanaudit.fn_setup_partition_constraints( my_partition_name );
+        perform cyanaudit.fn_create_partition_indexes( my_partition_name );
         perform cyanaudit.fn_setup_partition_inheritance( my_partition_name );
+        perform cyanaudit.fn_activate_partition( my_partition_name );
     end if;
 
     return my_partition_name;

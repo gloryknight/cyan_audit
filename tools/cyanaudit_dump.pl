@@ -105,8 +105,6 @@ foreach my $table_row (@$table_rows)
     print "$exporting_msg: ";
     print "Preparing... " if( -t STDIN );
 
-    $handle->do("analyze $schema.$table_name");
-
     my $total_rows_q = <<SQL;
         select reltuples::bigint
           from pg_class
