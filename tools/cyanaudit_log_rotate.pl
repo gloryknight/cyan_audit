@@ -24,7 +24,7 @@ sub usage
         . "  -p port    database server port\n"
         . "  -U user    database user name\n"
         . "  -d db      database name\n"
-        . "  -p         prune only, do not rotate\n"
+        . "  -P         prune only, do not rotate\n"
         . "  -n #       max number (count) of partitions to keep after pruning\n"
         . "  -s #       max size (gb) of logs to keep after pruning\n"
         . "  -a #       max age (days) of logs to keep after pruning\n";
@@ -49,7 +49,7 @@ my $schema = 'cyanaudit';
 ################
 ### ROTATING ###
 ################
-unless( $opts{'p'} )
+unless( $opts{'P'} )
 {
     my ($old_table_name) = $handle->selectrow_array( "select $schema.fn_get_active_partition_name()" );
     my ($table_name) = $handle->selectrow_array( "select $schema.fn_create_new_partition()" ) or die; 
