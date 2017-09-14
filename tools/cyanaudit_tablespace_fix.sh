@@ -10,7 +10,7 @@
 # TODO: Update to use fn_archive_partition() and perl's
 # get_cyanaudit_archive_table_list or similar for initial query
 
-psql -t -A -c "
+psql --quiet -t -A -c "
    select 'alter '
        || case when c.relkind = 'r'
                then 'table '
@@ -19,14 +19,16 @@ psql -t -A -c "
           end
        || n.nspname||'.'||c.relname
        || ' set tablespace '
-       || quote_ident(current_setting('cyanaudit.archive_tablespace'))
+       || quote_ident( cn.value )
        || ';'
      from pg_class c
      join pg_namespace n
        on c.relnamespace = n.oid
 left join pg_tablespace t
        on c.reltablespace = t.oid
-    where t.spcname is distinct from current_setting('cyanaudit.archive_tablespace')
+left join cyanaudit.tb_config cn
+       on cn.name = 'archive_tablespace'
+    where t.spcname is distinct from cn.value
       and c.relname ~ '^tb_audit_event_\d{8}_\d{4}$'
       and c.relkind in ('r','i')
     order by c.relname" | 
