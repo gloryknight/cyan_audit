@@ -43,6 +43,8 @@ unless( $opts{'n'} and $opts{'n'} =~ /^\d+$/ )
 
 my $handle = db_connect( \%opts ) or die "Database connect error.\n";
 
+$handle->do( "SET application_name = 'Cyanaudit Log Rotation'" );
+
 ### cyanaudit is no longer relocatable
 my $schema = 'cyanaudit';
 
@@ -89,8 +91,14 @@ unless( $opts{'P'} )
     
     if( $old_table_name )
     {
+        # Break inheritance so logging functions will not try to scan table / indexes
+        $handle->do( "ALTER TABLE $schema.$old_table_name NO INHERIT $schema.tb_audit_event" );
+        
         $handle->do( "select $schema.fn_setup_partition_constraints( ? )", undef, $old_table_name );
         $handle->do( "select $schema.fn_archive_partition( ? )", undef, $old_table_name ) or die;
+        
+        # Re set inheritance so that this partition is visible in vw_audit_log
+        $handle->do( "ALTER TABLE $schema.$old_table_name INHERIT $schema.tb_audit_event" );
     }
 
     print "Done.\n";
