@@ -1176,7 +1176,7 @@ begin
     then
         execute format( 'alter table cyanaudit.%I drop constraint %I',
                         in_table_name, my_constraint_name );
-    else
+    elsif my_constraint_src is not null then
         return;
     end if;
 
@@ -1345,7 +1345,7 @@ begin
         and cp.relname = 'tb_audit_event';
 
     if found then
-        raise notice 'cyanaudit: To avoid long locks, run fn_setup_partition_inheritance( %, false ) first.',
+        raise notice 'cyanaudit: To avoid long locks, run fn_setup_partition_inheritance( %, true ) first.',
             in_partition_name;
     end if;
 
@@ -1374,7 +1374,7 @@ declare
     my_index_name           varchar;
 begin
     if in_partition_name = cyanaudit.fn_get_active_partition_name() then
-        raise notice 'cyanaudit: Cannot archive active partition. Skipping.';
+        raise notice 'cyanaudit: Skipping archival of active partition.';
         return;
     end if;
 
@@ -1446,7 +1446,7 @@ begin
     return;
 end
  $_$
-    language plpgsql strict;
+    language plpgsql;
 
 CREATE OR REPLACE FUNCTION cyanaudit.fn_get_partitions_over_quantity_limit
 (

@@ -2,7 +2,8 @@
 ----------
 - Code cleanup including removal of a lot of stale extension-related code
 - Made cyanaudit_log_rotate.pl more robust and unintrusive re. lock contention
-- Added tools/install.pl to help with installation and upgrades.
+- Removed make-based install and added install.pl for installation and upgrades.
+- Increased robustness of config verification functions
 
 1.0.2 -> 2.0
 ------------

@@ -49,21 +49,21 @@ sub wait_for_open_transactions_to_finish
     print "Waiting for transactions to finish and be labeled...";
     until( $xmin >= $xmax )
     {
-        sleep 1;
-        print "xmin = $xmin, xmax = $xmax.\n";
         ($xmin) = $handle->selectrow_array( "select txid_snapshot_xmin( txid_current_snapshot() )" );
+        sleep 1;
     }
-    sleep 1;
     print "Done.\n";
 }
 
 my %opts;
 
-getopts('U:h:p:d:Pn:s:a:', \%opts) or usage();
+getopts('U:h:p:d:Pn:a:s:', \%opts) or usage();
 
-unless( $opts{'n'} and $opts{'n'} =~ /^\d+$/ )
+unless( ( $opts{'n'} and $opts{'n'} =~ /^\d+$/ ) 
+     or ( $opts{'a'} and $opts{'a'} =~ /^\d+$/ )
+     or ( $opts{'s'} and $opts{'s'} =~ /^\d+$/ ) )
 {
-    usage( "-n is required and must be an integer." );
+    usage( "one of -n, -a, or -s is required and must be an integer." );
 }
 
 my $handle = db_connect( \%opts ) or die "Database connect error.\n";
@@ -78,24 +78,32 @@ unless( $opts{'P'} )
     $handle->do("begin");
 
     my ($old_table_name) = $handle->selectrow_array( "select cyanaudit.fn_get_active_partition_name()" );
-    my ($table_name) = $handle->selectrow_array( "select cyanaudit.fn_create_new_partition('blah')" );
-    print "Created new partition cyanaudit.$table_name\n";
+    my ($table_name) = $handle->selectrow_array( "select cyanaudit.fn_create_new_partition()" );
 
-    print "Setting up and activating new partition... ";
-    $handle->do( "select cyanaudit.fn_verify_partition_config( ? )", undef, $table_name );
-    $handle->do( "select cyanaudit.fn_activate_partition( ? )", undef, $table_name );
-    print "Done.\n";
+    if( !defined( $table_name ) )
+    {
+        print "No events to rotate. Skipping creation of new logging partition.\n";
+    }
+    else
+    {
+        print "Created new partition cyanaudit.$table_name\n";
 
-    $handle->do("commit");
+        print "Setting up and activating new partition... ";
+        $handle->do( "select cyanaudit.fn_verify_partition_config( ? )", undef, $table_name );
+        $handle->do( "select cyanaudit.fn_activate_partition( ? )", undef, $table_name );
+        print "Done.\n";
 
-    &wait_for_open_transactions_to_finish();
+        $handle->do("commit");
 
-    print "Temporarily removing inheritance on old partition.\n";
-    $handle->do( "select cyanaudit.fn_setup_partition_inheritance( ?, false )", undef, $old_table_name );
+        &wait_for_open_transactions_to_finish( $handle );
 
-    print "Setting constraints, archiving, and reinstating inheritance on old partition...";
-    $handle->do( "select cyanaudit.fn_verify_parititon_config( ? )", undef, $old_table_name );
-    print "Done.\n";
+        print "Temporarily removing inheritance on old partition.\n";
+        $handle->do( "select cyanaudit.fn_setup_partition_inheritance( ?, true )", undef, $old_table_name );
+
+        print "Setting constraints, archiving, and reinstating inheritance on old partition...";
+        $handle->do( "select cyanaudit.fn_verify_partition_config( ? )", undef, $old_table_name );
+        print "Done.\n";
+    }
 }
 
 ###############
@@ -103,12 +111,12 @@ unless( $opts{'P'} )
 ###############
 if( $opts{'n'} or $opts{'s'} or $opts{'a'} )
 {
-    my $archive_q = "select cyanaudit.fn_prune_archive( ?, ?, ? )";
+    my $archive_q = "select cyanaudit.fn_prune_archive( ?, ? * interval '1d', ? )";
     my $tables = $handle->selectcol_arrayref( $archive_q, undef, $opts{'n'}, $opts{'a'}, $opts{'s'} );
 
     if( @$tables )
     {
-        print "Dropped the following old log partitions (> qty $opts{'n'})\n";
+        print "Dropped the following log partitions:\n";
         print "$_\n" foreach( @$tables );
     }
 }
