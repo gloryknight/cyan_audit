@@ -38,7 +38,7 @@ sub db_connect($)
     
     my $connect_string = "dbi:Pg:host=$host;dbname=$dbname;port=$port";
 
-    my $handle = DBI->connect( $connect_string, $user, '', { RaiseError => 1 } )
+    my $handle = DBI->connect( $connect_string, $user, '', { RaiseError => 1, PrintError => 0 } )
         or die "Database connect error. Please verify .pgpass and environment variables\n";
 
     return $handle;

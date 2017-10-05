@@ -1,3 +1,9 @@
+2.0 -> 2.1
+----------
+- Code cleanup including removal of a lot of stale extension-related code
+- Made cyanaudit_log_rotate.pl more robust and unintrusive re. lock contention
+- Added tools/install.pl to help with installation and upgrades.
+
 1.0.2 -> 2.0
 ------------
 - Cyan Audit is no longer an extension. Just run the .sql script to install. All

@@ -11,16 +11,7 @@
 # get_cyanaudit_archive_table_list or similar for initial query
 
 psql --quiet -t -A -c "
-   select 'alter '
-       || case when c.relkind = 'r'
-               then 'table '
-               when c.relkind = 'i'
-               then 'index '
-          end
-       || n.nspname||'.'||c.relname
-       || ' set tablespace '
-       || quote_ident( cn.value )
-       || ';'
+   select c.relname
      from pg_class c
      join pg_namespace n
        on c.relnamespace = n.oid
@@ -32,8 +23,8 @@ left join cyanaudit.tb_config cn
       and c.relname ~ '^tb_audit_event_\d{8}_\d{4}$'
       and c.relkind in ('r','i')
     order by c.relname" | 
-while read command; do
-    echo "$command"
-    psql -c "$command" || break
+while read table; do
+    COMMAND="select cyanaudit.fn_archive_partition( '$table' )"
+    psql -c "$COMMAND" || break
     # sleep 30
 done

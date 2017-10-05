@@ -31,24 +31,23 @@ these directions precisely:
 7. Install the files for the new version of Cyan Audit using `make install` from
    the base directory of the extracted tar.gz file.
 
-8. As superuser, drop the old extension & schema:
+8. As superuser, drop the old schema:
 
-        DROP EXTENSION cyanaudit CASCADE;
         DROP SCHEMA cyanaudit CASCADE;
 
-10. Install the cyanaudit extension in your database:
+10. Install the cyanaudit code in your database:
     
-        CREATE EXTENSION cyanaudit;
-        SELECT cyanaudit.fn_update_audit_fields('public'); --run on all logged schemas
-        SELECT cyanaudit.fn_create_event_trigger();
+        psql -d <yourdb> -U postgres -f cyanaudit.sql
 
-11. Set up cyanaudit.archive_tablespace GUC:
+        > SELECT cyanaudit.fn_update_audit_fields('public'); --run on all logged schemas
 
-        ALTER DATABASE <yourdb> SET cyanaudit.archive_tablespace = 'big_slow';
-
-12. Reenable connections to your database:
+11. Reenable connections to your database:
 
         ALTER DATABASE <yourdb> CONNECTION LIMIT -1;
+
+12. Set up cyanaudit.archive_tablespace GUC:
+
+        UPDATE cyanaudit.tb_config SET value = 'big_slow' WHERE name = 'archive_tablespace';
 
 13. Restore audit_field states:
 
@@ -61,6 +60,4 @@ these directions precisely:
 
 14. Restore old backups using the new `cyanaudit_restore.pl`
 
-15. Finish configuring other cyanaudit GUCs
-    
-
+15. Finish configuring other cyanaudit settings in tb_config;

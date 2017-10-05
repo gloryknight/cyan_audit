@@ -384,19 +384,6 @@ COMMENT ON FUNCTION cyanaudit.fn_update_audit_fields( varchar )
 
 ---- INTERNAL UTILITY FUNCTIONS ----
 
-/*
--- fn_is_installed_as_extension
-CREATE OR REPLACE FUNCTION cyanaudit.fn_is_installed_as_extension()
-returns boolean 
-language sql as
-$_$
-    select count(*) > 0
-      from pg_extension 
-     where extname = 'cyanaudit';
-$_$;
-*/
-
-
 -- fn_get_email_by_uid
 CREATE OR REPLACE FUNCTION cyanaudit.fn_get_email_by_uid
 (
@@ -742,7 +729,7 @@ exception
          raise notice 'cyanaudit: Invalid configuration. Please re-run fn_update_audit_fields().';
          return my_new_row;
     when undefined_table then
-         raise notice 'cyanaudit: Missing log table. Run cyanaudit.fn_verify_paritition_config() or reinstall cyanaudit.';
+         raise notice 'cyanaudit: Missing log table. Run cyanaudit.fn_verify_active_partition() or reinstall cyanaudit.';
          return my_new_row;
     when others then
          raise notice 'cyanaudit: Unknown exception %: %. Operation not logged', SQLSTATE, SQLERRM;
@@ -751,7 +738,7 @@ end
 $_$;
 
 COMMENT ON FUNCTION cyanaudit.fn_log_audit_event()
-    IS 'Trigger function installed on all tables logged by the cyanaudit extension.';
+    IS 'Trigger function installed on all tables logged by Cyan Audit.';
 
 
 
@@ -848,7 +835,7 @@ begin
         return NEW;
     end if;
 
-    perform cyanaudit.fn_verify_partition_config();
+    perform cyanaudit.fn_verify_active_partition();
 
     -- See if a logging trigger is already on the table
     perform *
@@ -863,12 +850,6 @@ begin
 
     -- If so, remove it so we can update it.
     IF FOUND THEN
-        /*
-        if cyanaudit.fn_is_installed_as_extension() then
-            perform cyanaudit.fn_remove_trigger_from_extension( NEW.table_schema, NEW.table_name );
-        end if;
-        */
-
         execute format( 'DROP TRIGGER tr_log_audit_event ON %I.%I',
                         NEW.table_schema, NEW.table_name );
     END IF;
@@ -897,11 +878,6 @@ begin
                         my_audit_fields,
                         my_column_names
                       );
-        /*
-        if cyanaudit.fn_is_installed_as_extension() then
-            perform cyanaudit.fn_add_trigger_to_extension( NEW.table_schema, NEW.table_name );
-        end if;
-        */
     END IF;
 
     return NEW;
@@ -912,80 +888,6 @@ DROP TRIGGER IF EXISTS tr_after_audit_field_change on cyanaudit.tb_audit_field;
 CREATE TRIGGER tr_after_audit_field_change
     AFTER INSERT OR UPDATE on cyanaudit.tb_audit_field
     FOR EACH ROW EXECUTE PROCEDURE cyanaudit.fn_after_audit_field_change();
-
-
-
-CREATE OR REPLACE FUNCTION cyanaudit.fn_add_trigger_to_extension
-(
-    in_table_schema varchar,
-    in_table_name   varchar
-)
-returns void as
- $_$
-    -- Hackish way to set up dependency from trigger to extension
-    INSERT INTO pg_depend
-    WITH tt_dependency AS
-    (
-        SELECT 'pg_trigger'::regclass as classid,
-               (
-                    SELECT t.oid
-                      FROM pg_trigger t
-                      JOIN pg_class c
-                        ON t.tgrelid = c.oid
-                       AND c.relname = in_table_name
-                      JOIN pg_namespace n
-                        ON c.relnamespace = n.oid
-                       AND n.nspname = in_table_schema
-                     WHERE t.tgname = 'tr_log_audit_event'
-               ) as objid,
-               0 as objsubid,
-               'pg_extension'::regclass as refclassid,
-               (SELECT oid FROM pg_extension where extname = 'cyanaudit') as refobjid,
-               0 as refobjsubid,
-               'e'::char as deptype
-    )
-    SELECT tt.*
-      FROM tt_dependency tt
- LEFT JOIN pg_depend d
-        ON row(tt.*) = row(d.*)
-     WHERE d.classid is null;
- $_$
-    language sql;
-
-
-
-CREATE OR REPLACE FUNCTION cyanaudit.fn_remove_trigger_from_extension
-(
-    in_table_schema varchar,
-    in_table_name   varchar
-)
-returns void as
- $_$
-    WITH tt_dependency AS
-    (
-        SELECT 'pg_trigger'::regclass as classid,
-               (
-                    SELECT t.oid
-                      FROM pg_trigger t
-                      JOIN pg_class c
-                        ON t.tgrelid = c.oid
-                       AND c.relname = in_table_name
-                      JOIN pg_namespace n
-                        ON c.relnamespace = n.oid
-                       AND n.nspname = in_table_schema
-                     WHERE t.tgname = 'tr_log_audit_event'
-               ) as objid,
-               0 as objsubid,
-               'pg_extension'::regclass as refclassid,
-               (SELECT oid FROM pg_extension where extname = 'cyanaudit') as refobjid,
-               0 as refobjsubid,
-               'e'::char as deptype
-    )
-    DELETE FROM pg_depend d
-     USING tt_dependency tt
-     WHERE row(d.*) = row(tt.*);
- $_$
-    language sql;
 
 
 
@@ -1022,11 +924,6 @@ begin
             WHEN TAG IN ('ALTER TABLE', 'CREATE TABLE', 'DROP TABLE')
             EXECUTE PROCEDURE cyanaudit.fn_update_audit_fields_event_trigger();
 
-        /*
-        if cyanaudit.fn_is_installed_as_extension() then
-            ALTER EXTENSION cyanaudit ADD EVENT TRIGGER tr_update_audit_fields;
-        end if;
-        */
     end if;
 end;
  $_$;
@@ -1243,7 +1140,8 @@ end
 -- fn_setup_partition_constraints
 CREATE OR REPLACE FUNCTION cyanaudit.fn_setup_partition_constraints
 (
-    in_table_name   varchar
+    in_table_name   varchar,
+    in_force        boolean default false
 )
 returns void as
  $_$
@@ -1253,6 +1151,7 @@ declare
     my_min_txid         bigint;
     my_max_txid         bigint;
     my_constraint_name  varchar;
+    my_constraint_src   text;
 begin
     if in_table_name is null then
         raise exception 'Table name cannot be null';
@@ -1260,7 +1159,8 @@ begin
 
     my_constraint_name := 'partition_range_chk';
 
-    perform *
+     select cn.consrc
+       into my_constraint_src
        from pg_constraint cn
        join pg_class c
          on cn.conrelid = c.oid
@@ -1270,9 +1170,14 @@ begin
         and cn.conname = my_constraint_name
         and c.relname = in_table_name;
 
-    if found then
+    if ( my_constraint_src like '% >= %' and in_table_name != cyanaudit.fn_get_active_partition_name() )
+       OR 
+       ( my_constraint_src is not null and in_force is true )
+    then
         execute format( 'alter table cyanaudit.%I drop constraint %I',
                         in_table_name, my_constraint_name );
+    else
+        return;
     end if;
 
     execute format( 'analyze cyanaudit.%I', in_table_name );
@@ -1281,11 +1186,13 @@ begin
                     in_table_name )
        into my_min_recorded, my_max_recorded, my_min_txid, my_max_txid;
 
-    if in_table_name = cyanaudit.fn_get_active_partition_name() then
+    if my_min_recorded is null 
+        OR in_table_name = cyanaudit.fn_get_active_partition_name() 
+    then
         execute format( 'ALTER TABLE cyanaudit.%I add constraint %I '
                      || ' CHECK( recorded >= %L )',
                         in_table_name, my_constraint_name, coalesce( my_min_recorded, now() ) );
-    elsif my_min_recorded is not null then
+    else
         execute format( 'ALTER TABLE cyanaudit.%I add constraint %I '
                     || ' CHECK( recorded between %L and %L and txid between %L and %L )',
                        in_table_name, my_constraint_name,
@@ -1345,7 +1252,8 @@ end
 -- fn_setup_partition_inheritance
 CREATE OR REPLACE FUNCTION cyanaudit.fn_setup_partition_inheritance
 (
-    in_partition_name   varchar
+    in_partition_name       varchar,
+    in_break_inheritance    boolean default false
 )
 returns void as
  $_$
@@ -1370,18 +1278,25 @@ begin
       where c_child.relname = in_partition_name
         and c_parent.relname = 'tb_audit_event';
 
-    -- If not, then set it up!
     if not found then
-        execute format( 'ALTER TABLE cyanaudit.%I INHERIT cyanaudit.tb_audit_event',
-                        in_partition_name );
+        if in_break_inheritance is false then
+            execute format( 'ALTER TABLE cyanaudit.%I INHERIT cyanaudit.tb_audit_event',
+                            in_partition_name );
+        end if;
+    else
+        if in_break_inheritance is true then
+            execute format( 'ALTER TABLE cyanaudit.%I NO INHERIT cyanaudit.tb_audit_event',
+                            in_partition_name );
+        end if;
     end if;
 end
  $_$
     language plpgsql;
 
 
--- fn_verify_partition_config()
-CREATE OR REPLACE FUNCTION cyanaudit.fn_verify_partition_config()
+
+-- fn_verify_active_partition()
+CREATE OR REPLACE FUNCTION cyanaudit.fn_verify_active_partition()
 returns varchar as
  $_$
 declare
@@ -1397,13 +1312,49 @@ begin
 
     if my_partition_name is null then
         my_partition_name := cyanaudit.fn_create_new_partition();
-        perform cyanaudit.fn_setup_partition_constraints( my_partition_name );
-        perform cyanaudit.fn_create_partition_indexes( my_partition_name );
-        perform cyanaudit.fn_setup_partition_inheritance( my_partition_name );
+        perform cyanaudit.fn_verify_partition_config( my_partition_name );
         perform cyanaudit.fn_activate_partition( my_partition_name );
     end if;
 
     return my_partition_name;
+end
+ $_$
+    language plpgsql;
+
+
+CREATE OR REPLACE FUNCTION cyanaudit.fn_verify_partition_config
+(
+    in_partition_name   varchar
+)
+returns varchar as
+ $_$
+begin
+    perform *
+       from pg_inherits i
+       join pg_class cp
+         on cp.oid = i.inhparent
+       join pg_namespace np
+         on cp.relnamespace = np.oid
+       join pg_class cc
+         on cc.oid = i.inhrelid
+       join pg_namespace nc
+         on cc.relnamespace = nc.oid
+      where nc.nspname = 'cyanaudit'
+        and np.nspname = 'cyanaudit'
+        and cc.relname = in_partition_name
+        and cp.relname = 'tb_audit_event';
+
+    if found then
+        raise notice 'cyanaudit: To avoid long locks, run fn_setup_partition_inheritance( %, false ) first.',
+            in_partition_name;
+    end if;
+
+    perform cyanaudit.fn_setup_partition_constraints( in_partition_name );
+    perform cyanaudit.fn_create_partition_indexes( in_partition_name );
+    perform cyanaudit.fn_archive_partition( in_partition_name );
+    perform cyanaudit.fn_setup_partition_inheritance( in_partition_name );
+
+    return in_partition_name;
 end
  $_$
     language plpgsql;
@@ -1422,6 +1373,11 @@ declare
     my_archive_tablespace   varchar;
     my_index_name           varchar;
 begin
+    if in_partition_name = cyanaudit.fn_get_active_partition_name() then
+        raise notice 'cyanaudit: Cannot archive active partition. Skipping.';
+        return;
+    end if;
+
     select c.value
       into my_archive_tablespace
       from cyanaudit.tb_config c
@@ -1430,7 +1386,7 @@ begin
      where c.name = 'archive_tablespace';
 
     if not found then
-        raise notice 'cyanaudit: Missing or invalid config value for ''archive_tablespace''. Aborting.';
+        raise notice 'cyanaudit: Missing or invalid config value for ''archive_tablespace''. Skipping.';
         return;
     end if;
 
@@ -1482,11 +1438,6 @@ begin
         select cyanaudit.fn_get_partitions_over_age_limit( in_keep_age )
         ORDER BY 1
     loop
-        /*
-        if cyanaudit.fn_is_installed_as_extension() then
-            execute format( 'ALTER EXTENSION cyanaudit DROP TABLE cyanaudit.%I', my_table_name );
-        end if;
-        */
         raise notice 'Dropping table: %', my_table_name;
         execute format( 'DROP TABLE cyanaudit.%I', my_table_name );
         return next my_table_name;
@@ -1648,7 +1599,7 @@ ON CONFLICT DO NOTHING;
 
 
 INSERT INTO cyanaudit.tb_config (name, value)
-     VALUES ('version', '2.0')
+     VALUES ('version', '2.1')
 ON CONFLICT (name) DO UPDATE 
         SET value = EXCLUDED.value 
       WHERE cyanaudit.tb_config.name = EXCLUDED.name;
