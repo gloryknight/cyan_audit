@@ -48,13 +48,20 @@ SQL
 
 # Returns arrayref of hashrefs, each hash containing keys 'table_name' and 'table_size_pretty'
 my $tables = $handle->selectcol_arrayref( $tables_q );
+my ($active_partition) = $handle->selectrow_array( 'select cyanaudit.fn_get_active_partition_name()' );
 
 print "Validating configuration of Cyan Audit log partitions:\n";
 
 foreach my $table (@$tables)
 {
     print "$table... ";
-    $handle->do( "select cyanaudit.fn_setup_partition_inheritance( ?, true )", undef, $table );
+
+    if( $table ne $active_partition )
+    {
+        $handle->do( "select cyanaudit.fn_setup_partition_inheritance( ?, true )", undef, $table );
+    }
+
     $handle->do( "select cyanaudit.fn_verify_partition_config( ? )", undef, $table );
+
     print "Done.\n";
 }

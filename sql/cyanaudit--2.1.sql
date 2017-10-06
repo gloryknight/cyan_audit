@@ -1262,6 +1262,12 @@ begin
         raise exception 'in_partition_name must not be null.';
     end if;
 
+    if in_partition_name = cyanaudit.fn_get_active_partition_name() 
+        AND in_break_inheritance
+    then
+        raise exception 'cyanaudit: refusing to break inheritance on active partition';
+    end if;
+
     -- See if inheritance is already set up for this table
     perform *
        from pg_inherits i
@@ -1344,7 +1350,7 @@ begin
         and cc.relname = in_partition_name
         and cp.relname = 'tb_audit_event';
 
-    if found then
+    if found and in_partition_name != cyanaudit.fn_get_active_partition_name() then
         raise notice 'cyanaudit: To avoid long locks, run fn_setup_partition_inheritance( %, true ) first.',
             in_partition_name;
     end if;
