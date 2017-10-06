@@ -1170,7 +1170,7 @@ begin
         and cn.conname = my_constraint_name
         and c.relname = in_table_name;
 
-    if ( my_constraint_src like '% >= %' and in_table_name != cyanaudit.fn_get_active_partition_name() )
+    if ( my_constraint_src not like '%txid%' and in_table_name != cyanaudit.fn_get_active_partition_name() )
        OR 
        ( my_constraint_src is not null and in_force is true )
     then

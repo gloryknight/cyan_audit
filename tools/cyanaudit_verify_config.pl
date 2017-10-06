@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+$| = 1;
+
 use DBI;
 use Getopt::Std;
 use File::Basename;
