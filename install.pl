@@ -5,7 +5,7 @@ use warnings;
 
 use DBI;
 use Getopt::Std;
-use File::Basename qw(dirname);
+use File::Basename qw(dirname basename);
 use File::Copy;
 
 use lib dirname(__FILE__) . '/tools';
@@ -93,7 +93,9 @@ my @files = <tools/*.p[lm]>;
 print "Copying scripts to $bindir...\n";
 foreach my $file (@files)
 {
-    copy( $file, $bindir ) or die;
-    print "- $file\n";
+    copy( $file, $bindir ) or die "$!";
+    my $dest = $bindir . '/' . basename($file);
+    print "- $dest\n";
+    chmod( 0755, $dest ) or die "$!";
 }
 print "Done!\n";
