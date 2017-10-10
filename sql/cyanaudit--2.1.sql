@@ -1444,7 +1444,6 @@ begin
         select cyanaudit.fn_get_partitions_over_age_limit( in_keep_age )
         ORDER BY 1
     loop
-        raise notice 'Dropping table: %', my_table_name;
         execute format( 'DROP TABLE cyanaudit.%I', my_table_name );
         return next my_table_name;
     end loop;
