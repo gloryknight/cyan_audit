@@ -1414,38 +1414,6 @@ end
     language plpgsql strict;
 
 
--- Returns names of tables dropped
-CREATE OR REPLACE FUNCTION cyanaudit.fn_prune_archive
-(
-    in_keep_qty         integer,
-    in_keep_age         interval default null,
-    in_keep_size_gb     integer default null
-)
-returns setof varchar as
- $_$
-declare
-    my_table_name           varchar;
-begin
-    if in_keep_qty < 0 then
-        raise exception 'in_keep_qty may not be negative.';
-    end if;
-
-    for my_table_name in
-        select cyanaudit.fn_get_partitions_over_quantity_limit( in_keep_qty )
-         UNION
-        select cyanaudit.fn_get_partitions_over_size_limit( in_keep_size_gb )
-         UNION
-        select cyanaudit.fn_get_partitions_over_age_limit( in_keep_age )
-        ORDER BY 1
-    loop
-        execute format( 'DROP TABLE cyanaudit.%I', my_table_name );
-        return next my_table_name;
-    end loop;
-
-    return;
-end
- $_$
-    language plpgsql;
 
 CREATE OR REPLACE FUNCTION cyanaudit.fn_get_partitions_over_quantity_limit
 (
