@@ -145,17 +145,11 @@ begin
     my_uid := nullif( current_setting( 'cyanaudit.uid', true ), '' );
 
     if my_uid is null or my_uid < 0 then
-        select cyanaudit.fn_get_uid_by_username(current_user::varchar)
+        select cyanaudit.fn_get_uid_by_username( current_user::varchar )
           into my_uid;
-
-        return cyanaudit.fn_set_current_uid( coalesce( my_uid, 0 ) );
     end if;
 
-    return my_uid;
-exception
-    when undefined_object then
-        return null;
-
+    return cyanaudit.fn_set_current_uid( coalesce( my_uid, 0 ) );
 end
  $_$;
 
