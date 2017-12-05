@@ -111,12 +111,20 @@ unless( $opts{'P'} )
 ###############
 if( $opts{'n'} or $opts{'s'} or $opts{'a'} )
 {
-    my $archive_q = "select cyanaudit.fn_prune_archive( ?, ? * interval '1d', ? )";
-    my $tables = $handle->selectcol_arrayref( $archive_q, undef, $opts{'n'}, $opts{'a'}, $opts{'s'} );
+    my $tables_q = "select cyanaudit.fn_get_partitions_over_quantity_limit( ? ) "
+                 . " UNION "
+                 . "select cyanaudit.fn_get_partitions_over_size_limit( ? ) "
+                 . " UNION "
+                 . "select cyanaudit.fn_get_partitions_over_age_limit( ? * interval '1d' ) "
+                 . "ORDER BY 1 ";
 
-    if( @$tables )
+    my $tables = $handle->selectcol_arrayref( $tables_q, undef, $opts{'n'}, $opts{'s'}, $opts{'a'} );
+
+    for my $table ( @$tables )
     {
-        print "Dropped the following log partitions:\n";
-        print "$_\n" foreach( @$tables );
+        print "Dropping $table... ";
+        $handle->do( "SELECT cyanaudit.fn_setup_partition_inheritance( ?, true )", undef, $table );
+        $handle->do( "DROP TABLE cyanaudit.$table" );
+        print "Done.\n";
     }
 }
