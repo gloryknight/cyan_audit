@@ -892,7 +892,17 @@ returns event_trigger
 language plpgsql as
    $function$
 begin
-    perform cyanaudit.fn_update_audit_fields();
+    -- Avoid creating logging triggers during database restore,
+    -- since the triggers will be restored without our help.
+    perform *
+       from pg_stat_activity
+      where application_name = 'pg_restore'
+        and datname = current_database()
+        and state = 'active';
+
+    if not found then
+        perform cyanaudit.fn_update_audit_fields();
+    end if;
 exception
      when insufficient_privilege
      then return;
