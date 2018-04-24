@@ -1008,10 +1008,6 @@ CREATE OR REPLACE FUNCTION cyanaudit.fn_create_new_partition
 returns varchar as
  $_$
 begin
-    if in_new_table_name is null then
-        raise exception 'in_new_table_name cannot be null';
-    end if;
-
     if in_new_table_name !~ '^tb_audit_event_\d{8}_\d{4}$' then
         raise exception 'Table name must conform to format "tb_audit_event_########_####"';
     end if;
@@ -1339,6 +1335,10 @@ CREATE OR REPLACE FUNCTION cyanaudit.fn_verify_partition_config
 returns varchar as
  $_$
 begin
+    if in_partition_name is null then
+        raise exception 'cyanaudit: fn_verify_partition_config: in_partition_name must be specified';
+    end if;
+    
     perform *
        from pg_inherits i
        join pg_class cp
@@ -1355,11 +1355,18 @@ begin
         and cp.relname = 'tb_audit_event';
 
     if found and in_partition_name != cyanaudit.fn_get_active_partition_name() then
-        raise notice 'cyanaudit: To avoid long locks, run fn_setup_partition_inheritance( %, true ) first.',
+        raise exception 'cyanaudit: please run fn_setup_partition_inheritance( ''%'', true ) first.',
             in_partition_name;
     end if;
 
-    perform cyanaudit.fn_setup_partition_constraints( in_partition_name );
+    if in_partition_name 
+
+    -- Only set up the constraint if we're not restoring, since we don't know in
+    -- this case that the lower bound is now(), as the function will assume.
+    if current_setting( 'cyanaudit.in_restore', true )::boolean is distinct from true then
+        perform cyanaudit.fn_setup_partition_constraints( in_partition_name );
+    end if;
+
     perform cyanaudit.fn_create_partition_indexes( in_partition_name );
     perform cyanaudit.fn_archive_partition( in_partition_name );
     perform cyanaudit.fn_setup_partition_inheritance( in_partition_name );

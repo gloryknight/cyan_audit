@@ -163,7 +163,7 @@ my $handle = db_connect( \%opts )
 
 my $schema = 'cyanaudit';
 
-$handle->do( "SELECT $schema.fn_verify_partition_config()" );
+$handle->do( "SELECT $schema.fn_verify_active_partition()" );
 
 foreach my $file( @ARGV )
 {
@@ -194,6 +194,9 @@ foreach my $file( @ARGV )
     (my $table_name = basename( $file ) ) =~ s/\.csv\.gz$//;
 
     $handle->do( "BEGIN" );
+
+    # Used later on
+    $handle->do("SELECT set_config( 'cyanaudit.in_restore', 'true', true )") or die;
 
     my $create_q = "SELECT $schema.fn_create_new_partition( '$table_name' )";
     my ($table_name_check) = $handle->selectrow_array( $create_q ) or die;
