@@ -55,7 +55,7 @@ sub print_restore_stats($$$)
     my $delta = microtime() - $start_time;
     my $rate = $rows_restored / $delta;
     printf "\r$table_name: Restored %-26s, total %d rows @ %d rows/sec ", 
-        $timestamp, $rows_restored - 1, $rate;
+        $timestamp, $rows_restored, $rate;
 }
 
 sub build_db_row_from_csv_row($$)
