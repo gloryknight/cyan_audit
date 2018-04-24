@@ -1359,8 +1359,6 @@ begin
             in_partition_name;
     end if;
 
-    if in_partition_name 
-
     -- Only set up the constraint if we're not restoring, since we don't know in
     -- this case that the lower bound is now(), as the function will assume.
     if current_setting( 'cyanaudit.in_restore', true )::boolean is distinct from true then
