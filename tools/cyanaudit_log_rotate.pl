@@ -24,10 +24,10 @@ sub usage
         . "  -p port    database server port\n"
         . "  -U user    database user name\n"
         . "  -d db      database name\n"
-        . "  -P         prune only, do not rotate\n"
-        . "  -n #       max number (count) of partitions to keep after pruning\n"
-        . "  -s #       max size (gb) of logs to keep after pruning\n"
-        . "  -a #       max age (days) of logs to keep after pruning\n";
+        . "  -P         Prune only (Do Not Rotate)\n"
+        . "  -n #       Prune to this quantity of partitions\n"
+        . "  -s #       Prune to this size (gb) of audit data\n"
+        . "  -a #       Prune to this age (days) of audit data\n";
 
     exit 1;
 }
@@ -59,11 +59,11 @@ my %opts;
 
 getopts('U:h:p:d:Pn:a:s:', \%opts) or usage();
 
-unless( ( $opts{'n'} and $opts{'n'} =~ /^\d+$/ ) 
-     or ( $opts{'a'} and $opts{'a'} =~ /^\d+$/ )
-     or ( $opts{'s'} and $opts{'s'} =~ /^\d+$/ ) )
+if( ( $opts{'n'} and $opts{'n'} !~ /^\d+$/ ) 
+ or ( $opts{'a'} and $opts{'a'} !~ /^\d+$/ )
+ or ( $opts{'s'} and $opts{'s'} !~ /^\d+$/ ) )
 {
-    usage( "one of -n, -a, or -s is required and must be an integer." );
+    usage( "-n, -a, -s: integer value required." );
 }
 
 my $handle = db_connect( \%opts ) or die "Database connect error.\n";

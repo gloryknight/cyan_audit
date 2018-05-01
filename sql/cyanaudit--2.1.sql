@@ -624,7 +624,10 @@ declare
     my_new_value            text;
     my_clock_timestamp      timestamp;
     my_enabled              text;
+    my_exception_text       text;
 begin
+    my_exception_text := 'cyanaudit: Operation not logged';
+
     if( TG_OP = 'INSERT' ) then
         my_new_row := NEW;
         my_old_row := NEW;
@@ -708,25 +711,17 @@ begin
 
     return new;
 exception
-    when undefined_object then
+    when foreign_key_violation OR undefined_column then
+         raise notice '%: %: %: Please run fn_update_audit_fields().', 
+            my_exception_text, SQLSTATE, SQLERRM;
          return my_new_row;
-    when undefined_function then
-         raise notice 'cyanaudit: Missing internal function. Please reinstall.';
-         return my_new_row;
-    when undefined_column then
-         raise notice 'cyanaudit: Attempt to log deleted column. Please run cyanaudit.fn_update_audit_fields() as superuser.';
-         return my_new_row;
-    when insufficient_privilege then
-         raise notice 'cyanaudit: Incorrect permissions. Operation not logged';
-         return my_new_row;
-    when foreign_key_violation then
-         raise notice 'cyanaudit: Invalid configuration. Please re-run fn_update_audit_fields().';
-         return my_new_row;
-    when undefined_table then
-         raise notice 'cyanaudit: Missing log table. Run cyanaudit.fn_verify_active_partition() or reinstall cyanaudit.';
+    when undefined_function OR undefined_table OR insufficient_privilege then
+         raise notice '%: %: %: Please reinstall cyanaudit.', 
+            my_exception_text, SQLSTATE, SQLERRM;
          return my_new_row;
     when others then
-         raise notice 'cyanaudit: Unknown exception %: %. Operation not logged', SQLSTATE, SQLERRM;
+         raise notice '%: %: %: Please report error.', 
+            my_exception_text, SQLSTATE, SQLERRM;
          return my_new_row;
 end
 $_$;

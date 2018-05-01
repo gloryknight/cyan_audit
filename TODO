@@ -3,3 +3,4 @@
     - %-breakdown of logging by column
 - cron job to email the report
 - transaction-only scope for fn_set_audit_uid()
+- Log rotate by remaining free space

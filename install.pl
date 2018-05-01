@@ -89,13 +89,24 @@ my $bindir = `pg_config --bindir` or die;
 chomp( $bindir );
 print "$bindir\n";
 
-my @files = <tools/*.p[lm]>;
-print "Copying scripts to $bindir...\n";
-foreach my $file (@files)
+if( -w $bindir )
 {
-    copy( $file, $bindir ) or die "$!";
-    my $dest = $bindir . '/' . basename($file);
-    print "- $dest\n";
-    chmod( 0755, $dest ) or die "$!";
+    print "Copying scripts to $bindir...\n";
+    my @files = <tools/*.p[lm]>;
+    foreach my $file (@files)
+    {
+        copy( $file, $bindir ) or die "$!";
+        my $dest = $bindir . '/' . basename($file);
+        print "- $dest\n";
+        chmod( 0755, $dest ) or die "$!";
+    }
+    print "Done!\n";
 }
-print "Done!\n";
+else
+{
+    print "Skipping copy of scripts to $bindir: Directory is not writable.\n";
+}
+
+print "\nCyan Audit $new_version successfully installed to database '$db'.\n\n";
+print "Now you must SELECT cyanaudit.fn_update_audit_fields('public')\n"
+    . "   and repeat for each schema you would like to log.\n";
