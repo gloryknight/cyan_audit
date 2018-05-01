@@ -4,6 +4,8 @@
 - Made cyanaudit_log_rotate.pl more robust and unintrusive re. lock contention
 - Removed make-based install and added install.pl for installation and upgrades.
 - Increased robustness of config verification functions
+- Improved exception handling in fn_log_audit_event()
+- cyanaudit_log_rotate.pl can now rotate without pruning (-n/-s/-a now optional)
 
 1.0.2 -> 2.0
 ------------
