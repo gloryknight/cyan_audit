@@ -163,8 +163,8 @@ Restore a couple backup files to an existing Cyan Audit installation:
         /mnt/backups/cyanaudit/app_db/tb_audit_event_20180102_1200.gz
 
 
-Upgrading or Reinstalling Cyan Audit
-====================================
+Reinstalling or Upgrading Cyan Audit In Place
+=============================================
 
 If you wish to reinstall Cyan Audit without dropping it, simply re-run the
 install script and it will automatically re-install the same version you
@@ -189,6 +189,43 @@ Cyan Audit's scripts can be removed as follows:
 
     # rm /var/lib/psql-X.X/bin/[cC]yanaudit*
 
+
+Removing & Reinstalling Cyan Audit
+==================================
+
+Sometimes a completely fresh install might be needed (please report the bug if
+so). In this case, it will involve a little bit of downtime, but you can back up
+all of your logs, remove, reinstall and restore the logs, as follows:
+
+1.  Rotate logs using `cyanaudit_log_rotate.pl`
+2.  Back up all logs using `cyanaudit_dump.pl`
+3.  Shut down database access (e.g. by turning off pgbouncer)
+4.  Run `cyanaudit_dump.pl` again to catch the last bit of logs
+5.  Install new cyanaudit scripts using `./install.pl` from cyanaudit directory
+6.  Create backup of `cyanaudit.tb_audit_field` (for the enabled values) and
+    `cyanaudit.tb_config` for the new installation:  
+    `CREATE TABLE public.tb_audit_field_backup AS SELECT * FROM cyanaudit.tb_audit_field;`  
+    `CREATE TABLE public.tb_cyanaudit_config_backup AS SELECT * FROM cyanaudit.tb_config;` 
+7.  `DROP SCHEMA cyanaudit CASCADE;`
+8.  `./install.pl -d app_db -h localhost`
+9.  `select fn_update_audit_fields('public')` # (Also run this for any other schema being logged)
+10. Restore the configs from your backups of tb_audit_field and tb_config:  
+    ```
+    UPDATE cyanaudit.tb_audit_field af   
+       SET enabled = afb.enabled   
+      FROM public.tb_audit_field_backup afb   
+     WHERE afb.table_schema = af.table_schema   
+       AND afb.table_name = af.table_name   
+       AND afb.column_name = af.column_name;  
+    UPDATE cyanaudit.tb_config c  
+       SET value = ccb.value  
+      FROM public.tb_cyanaudit_config_backup ccb  
+     WHERE ccb.name = c.name;  
+    ```
+11. Re-enable database access (e.g. restart pgbouncer)
+12. TEST THE SYSTEM. Log in. See if things are being logged.
+13. Restore old logs using `cyanaudit_restore.pl`, remembering to restore only
+    as much logs as are normally kept on the server (not the whole history!)
 
 
 Important Notes
