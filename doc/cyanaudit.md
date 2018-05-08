@@ -163,6 +163,20 @@ Restore a couple backup files to an existing Cyan Audit installation:
         /mnt/backups/cyanaudit/app_db/tb_audit_event_20180102_1200.gz
 
 
+Upgrading or Reinstalling Cyan Audit
+====================================
+
+If you wish to reinstall Cyan Audit without dropping it, simply re-run the
+install script and it will automatically re-install the same version you
+currently have installed:
+
+    ./install.pl -d app_db -U postgres
+
+If you'd like to upgrade an existing installation, simply use the -V flag with
+the version you'd like to install:
+    
+    ./install.pl -d app_db -U postgres -V 2.2
+
 
 Uninstalling Cyan Audit
 =======================
