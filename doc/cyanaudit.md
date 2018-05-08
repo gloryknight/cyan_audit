@@ -1,13 +1,14 @@
-![Cyan Audit Logo](https://db.tt/IrZ3wQpr)
+![Cyan Audit Logo](cyanaudit_logo.png)
 
 Overview
 ========
 
-Where did that unexpected value in the database came from?  Do you have to fix
-your code? Or do you have to fix the user? Which user?
+Cyan Audit provides an easy-to-use SQL-searchable log of who changed your data
+and when. It is a stable, powerful and mature DML logging extension for
+PostgreSQL 9.6+. 
 
-Don't waste time adding logging hooks to your application; Cyan Audit logs every
-INSERT, UPDATE and DELETE, and gives you an easy-to-use view for querying the log.
+Cyan Audit is written entirely in pl/pgsql and is trigger-based, so it does not
+require admin privileges at the cluster or system levels.
 
 
 Basic Usage
@@ -15,10 +16,9 @@ Basic Usage
 
 Install Cyan Audit:
 
-    $ su
-    # unzip cyanaudit-X.X.X.zip
-    # cd cyanaudit-X.X.X
-    # psql -U postgres -d app_db -1 -f cyanaudit.sql
+    $ tar zxvf cyanaudit-X.X.zip
+    $ cd cyanaudit-X.X
+    $ ./install.pl -d dbname [ -h dbhost -p dbport -U dbuser ]
 
 Turn on logging for schemas `public` and `app_schema`:
 
@@ -53,9 +53,9 @@ The audit log view looks like this:
     | old_value   | NULL on 'I'. Never NULL on 'D'. IS DISTINCT FROM new_value.
     | new_value   | NULL on 'D'. Never NULL on 'I'. IS DISTINCT FROM old_value.
 
-With `\pset format wrapped`, these columns fit comfortably across the screen.
+With `\pset format wrapped`, these columns fit nicely  across a ~200 col display
 
-Toggle logging on a column-by-column basis:
+Disable logging for a particularly noisy column:
     
     UPDATE cyanaudit.tb_audit_field
        SET enabled = false
@@ -84,15 +84,15 @@ Set uid value to 42 for all subsequent activity in the current session:
 
     SELECT cyanaudit.fn_set_current_uid( 42 );
 
-Label all unlabled, completed operations in this transaction:
+Set the description for all future DML in this transaction:
+
+    SELECT cyanaudit.fn_set_transaction_label( 'Change last name' );
+
+Set the description for all past, unlabled DML in this transaction:
 
     SELECT cyanaudit.fn_label_transaction( 'User disabled due to inactivity' );
 
-Label all unlabled operations in the most-recently-committed transaction:
-
-    SELECT cyanaudit.fn_label_transaction( 'User enabled', cyanaudit.fn_get_last_txid() );
-
-Shorthand for above:
+Set the label for all unlabled DML in this session's last logged transaction:
 
     SELECT cyanaudit.fn_label_last_transaction( 'User enabled' );
 
@@ -107,13 +107,13 @@ Final Configuration Steps
 
 Tell Cyan Audit how to populate `vw_audit_log.user_email` based on logged uids:
 
-    ALTER DATABASE mydb SET cyanaudit.user_table                = 'users';
-    ALTER DATABASE mydb SET cyanaudit.user_table_uid_col        = 'user_id';
-    ALTER DATABASE mydb SET cyanaudit.user_table_email_col      = 'email_address';
+    UPDATE cyanaudit.tb_config SET value = 'users'          where name = 'user_table'
+    UPDATE cyanaudit.tb_config SET value = 'user'           where name = 'user_table_uid_col'
+    UPDATE cyanaudit.tb_config SET value = 'email_address'  where name = 'user_table_email_col''
 
 Enable setting uid automatically when `current_user` matches `users.username`: 
 
-    ALTER DATABASE mydb SET cyanaudit.user_table_username_col   = 'username';
+    UPDATE cyanaudit.tb_config SET value = 'username' WHERE name = 'user_table_username_col';
 
 Set the tablespace to which rotated logs will be moved:
 
@@ -147,34 +147,38 @@ Cyan Audit's logs are divided (sharded) into partitions, which are created every
 time you run `cyanaudit_log_rotate.pl`. If you ran it at 2016-01-10 09:00, it
 would create a new partition called `cyanaudit.tb_audit_event_20160110_0900`.
 
-Cron to rotate logs weekly, dropping archives after 10 weeks:
+Cron to rotate logs weekly, dropping archive tables over 10 in quantity, over
+20GB in size, and over 30 days in age:
 
-    0 0 * * 0  /usr/pgsql-9.3/bin/cyanaudit_log_rotate.pl -U postgres -d app_db -n 10
+    0 0 * * 0  /usr/pgsql-X.X/bin/cyanaudit_log_rotate.pl -U postgres -d app_db -n 10 -s 20 -a 30
 
 Cron to back up logs nightly (skips tables already having current backup):
 
-    5 0 * * *  /usr/pgsql-9.3/bin/cyanaudit_dump.pl -U postgres -d app_db /mnt/backups/cyanaudit/app_db
+    5 0 * * *  /usr/pgsql-X.X/bin/cyanaudit_dump.pl -U postgres -d app_db /mnt/backups/cyanaudit/app_db/
 
-Restore all backup files to an existing Cyan Audit installation:
+Restore a couple backup files to an existing Cyan Audit installation:
 
-    # /usr/pgsql/9.3/bin/cyanaudit_restore.pl -U postgres -d app_db /mnt/backups/cyanaudit/app_db/*.gz
+    # /usr/pgsql/9.3/bin/cyanaudit_restore.pl -U postgres -d app_db \
+        /mnt/backups/cyanaudit/app_db/tb_audit_event_20180101_1200.gz \
+        /mnt/backups/cyanaudit/app_db/tb_audit_event_20180102_1200.gz
+
+
+
+Uninstalling Cyan Audit
+=======================
+
+Cyan Audit lives entirely in the cyanaudit schema, and can be dropped as follows:
+
+    psql> DROP SCHEMA cyanaudit CASCADE
+
+Cyan Audit's scripts can be removed as follows:
+
+    # rm /var/lib/psql-X.X/bin/[cC]yanaudit*
 
 
 
 Important Notes
 ===============
-* Requires PostgreSQL 9.3.3 or above.
-
-* Not compatible with multithreaded `pg_restore` (`-j 2+`).  `pg_restore`
-  sometimes neglects to install the logging triggers on system tables, even
-  though they are present in the dump. No error is emitted by `pg_restore`.
-
-* `DROP EXTENSION cyanaudit` will require `CASCADE` in order to drop the
-  logging triggers on your system tables. This is because PostgreSQL does not
-  currently support extensions owning triggers. Setting up the ownership in
-  `pg_depend` manually does allow the omission of `CASCADE`, but it causes
-  postgres to refuse to drop a table that is being logged, because it cannot
-  drop the logging trigger without dropping the extension.
 
 * When using with pgbouncer or other connnection poolers, you must use
   session-level pooling (not statement-level or transaction-level) for
@@ -195,10 +199,7 @@ Important Notes
         Else If we know of no fields in this table, then:
             If any field in same schema is enabled, then true.
             Else If we know of fields in this schema but all are inactive, then false.
-            Else If we know of no columns in this schema, then:
-                If any column in the database is enabled, then true.
-                Else If we know of fields in this database but all are inactive, then false.
-                Else, true
+            Else true
 
 * When querying `vw_audit_log`, being as specific as possible about your
   `table_name` and `column_name` will greatly speed up search results.
@@ -214,4 +215,3 @@ About
 * Cyan Audit is written and maintained by Moshe Jacobson -- <moshe@neadwerx.com>
 
 * Development sponsored by Nead Werx, Inc. -- <http://www.neadwerx.com>
-
