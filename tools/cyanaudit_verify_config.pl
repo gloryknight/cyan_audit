@@ -18,7 +18,9 @@ sub usage
     my( $msg ) = @_;
 
     warn "Error: $msg\n" if( $msg );
-    print "Usage: $0 [ options ... ]\n"
+    print "Verifies that the Cyan Audit log partitions are set up correctly.\n"
+        . "\n"
+        . "Usage: $0 [ options ... ]\n"
         . "Options:\n"
         . "  -h host    database server host or socket directory\n"
         . "  -p port    database server port\n"
