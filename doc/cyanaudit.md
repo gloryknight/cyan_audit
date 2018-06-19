@@ -1,4 +1,4 @@
-![Cyan Audit Logo](cyanaudit_logo.png)
+![Cyan Audit Logo](https://bitbucket.org/neadwerx/cyanaudit/raw/master/doc/cyanaudit_logo.png)
 
 Overview
 ========
