@@ -1,3 +1,9 @@
+2.1 -> 2.2.0
+------------
+- Change back to major.minor.revision versioning for pgxn compatibility
+- Fix various problems restoring cyanaudit schema during pg_restore
+- Completely update documentation
+
 2.0 -> 2.1
 ----------
 - Code cleanup including removal of a lot of stale extension-related code
