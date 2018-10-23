@@ -233,7 +233,7 @@ returns void as
     language sql strict;
 
 COMMENT ON FUNCTION cyanaudit.fn_label_last_transaction( varchar )
-    IS 'Shorthand for: fn_label_last_transaction( in_label, cyanaudit.fn_get_last_txid() )';
+    IS 'Shorthand for: fn_label_transaction( in_label, cyanaudit.fn_get_last_txid() )';
 
 
 CREATE OR REPLACE FUNCTION cyanaudit.fn_set_transaction_label

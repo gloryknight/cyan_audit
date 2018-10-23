@@ -44,7 +44,7 @@ The audit log view looks like this:
     |-------------|---------------------------------------------------------------  
     | recorded    | clock_timestamp of each logged operation.  
     | uid         | UID of application user, set with SELECT fn_set_current_uid(uid). 
-    | user_email  | Derived from uid (see GUC SETTINGS below for configuring).  
+    | user_email  | Derived from uid (see Final Configuration Steps below).  
     | txid        | Indexed for easy lookup.  
     | table_name  | Affected table (schema-qualified if not in search_path)
     | column_name | Column whose values are given in old_value and new_value.
