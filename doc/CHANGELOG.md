@@ -1,3 +1,8 @@
+2.2.0 -> 2.2.1
+--------------
+- Now installs on Windows thanks to patch from Benjamin Hayes!
+- Other minor install script fixes
+
 2.1 -> 2.2.0
 ------------
 - Change back to major.minor.revision versioning for pgxn compatibility

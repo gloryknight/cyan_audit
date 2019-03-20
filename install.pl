@@ -28,7 +28,10 @@ sub usage
     exit 1
 }
 
-chomp( my $pg_version = `pg_config --version` );
+my $pg_version = `pg_config --version` or die 'Could not get version using pg_config\n';
+
+chomp( $pg_version );
+
 if( $pg_version =~ / 8\.| 9\.[012345]\b/ )
 {
     die "Cyan Audit requires PostgreSQL 9.6.0 or above.\n";
@@ -95,8 +98,15 @@ elsif( $new_version eq $current_version )
 for my $script ($pre_sql, $base_sql, $post_sql)
 {
     next unless ( $script and -r $script );
-
-    my $command = "psql -U $user -d $db -p $port -h $host -f '$script' > /dev/null";
+    my $command;
+    if ($^O =~ /MSWin32/)
+    {
+        $command = "psql -U $user -d $db -p $port -h $host -f $script";
+    }
+    else
+    {
+        $command = "psql -U $user -d $db -p $port -h $host -f '$script' > /dev/null";
+    }
     print "Running $script ... ";
     system( $command ) == 0 or die;
     print "Success!\n";

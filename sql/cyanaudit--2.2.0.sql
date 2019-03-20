@@ -1596,5 +1596,6 @@ grant  select
        on cyanaudit.tb_config                   to public;
 
 SELECT cyanaudit.fn_create_event_trigger();
+SELECT cyanaudit.fn_verify_active_partition();
 
 COMMIT;
