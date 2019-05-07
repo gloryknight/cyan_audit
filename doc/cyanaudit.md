@@ -67,7 +67,7 @@ Disable logging for the current session:
 
     SET cyanaudit.enabled = 0;
 
-Play back the inverse of your last transaction:
+Play back the inverse of the DML logged in the last transaction:
     
     SELECT cyanaudit.fn_undo_transaction( cyanaudit.fn_get_last_txid() );
 
@@ -117,7 +117,7 @@ Enable setting uid automatically when `current_user` matches `users.username`:
 
 Set the tablespace to which rotated logs will be moved:
 
-    ALTER DATABASE mydb SET cyanaudit.archive_tablespace        = 'big_n_slow';
+    ALTER DATABASE mydb SET cyanaudit.archive_tablespace = 'big_n_slow';
 
 Cause all sessions to reload settings by forcing reconnect (optional):
 
@@ -237,10 +237,10 @@ Important Notes
   Additionally, you must have the pooler issue a `DISCARD ALL` command to reset
   the persistent server connection after a client disconnects.
 
-* `fn_update_audit_fields()` will hold an exclusive lock on all of your tables
-  until the function returns. On a test database with about 3500 columns, this
-  took 12 seconds. Please make sure you run this at a time when it is
-  acceptable for your tables to be locked for up to a minute.
+* The first time you run `fn_update_audit_fields()`, it will hold an exclusive
+  lock on all of your tables until the function returns. On a test database with
+  about 3500 columns, this took 12 seconds. Please make sure you run this at a
+  time when it is acceptable for your tables to be locked for up to a minute.
 
 * When Cyan Audit finds a new column (e.g. during `fn_update_audit_fields()`),
   it will decide the default value for `enabled` as follows:
