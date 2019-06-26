@@ -1,5 +1,7 @@
 2.2.0 -> 2.2.1
 --------------
+- Fix exception when trying to log an operation after fn_set_transaction_label()
+  is called followed by RESET ALL or DISCARD ALL.
 - Now installs on Windows thanks to patch from Benjamin Hayes!
 - Other minor install script fixes
 

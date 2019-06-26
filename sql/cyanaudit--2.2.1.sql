@@ -697,7 +697,7 @@ begin
                 my_pk_vals,
                 cyanaudit.fn_get_current_uid(),
                 TG_OP,
-                current_setting( 'cyanaudit.audit_transaction_type', true )::integer,
+                nullif( current_setting( 'cyanaudit.audit_transaction_type', true ), '' )::integer,
                 my_old_value,
                 my_new_value;
     end loop;
@@ -712,6 +712,10 @@ exception
          raise notice '%: %: %: Please reinstall cyanaudit.', 
             my_exception_text, SQLSTATE, SQLERRM;
          return my_new_row;
+    when invalid_text_representation then
+         raise notice '%: %: %: GUC ''cyanaudit.audit_transaction_type'' has non-integer value ''%''. Set with fn_set_transaction_label() or leave unset.',
+            my_exception_text, SQLSTATE, SQLERRM,
+            current_setting( 'cyanaudit.audit_transaction_type', true );;
     when others then
          raise notice '%: %: %: Please report error.', 
             my_exception_text, SQLSTATE, SQLERRM;
