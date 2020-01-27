@@ -46,13 +46,13 @@ sub wait_for_open_transactions_to_finish
     # the previous xmax value, meaning all transactions have completed. This is
     # to prevent attempts to label a transaction while that transaction's table
     # partition is being exclusively locked for the next steps.
-    print "Waiting for transactions to finish and be labeled...";
+    print "INFO: Waiting for transactions to finish and be labeled...\n";
     until( $xmin >= $xmax )
     {
         ($xmin) = $handle->selectrow_array( "select txid_snapshot_xmin( txid_current_snapshot() )" );
         sleep 1;
     }
-    print "Done.\n";
+    print "INFO: Done.\n";
 }
 
 my %opts;
@@ -68,6 +68,31 @@ if( ( $opts{'n'} and $opts{'n'} !~ /^\d+$/ )
 
 my $handle = db_connect( \%opts ) or die "Database connect error.\n";
 
+# Turns db Notice message into INFO for scheduler reporting
+$SIG{__WARN__} = sub {
+     my ( $warning ) = @_;
+
+     if( $warning and $warning =~ m/^NOTICE:/ )
+     {
+         # print the modifed message to STDOUT (as SchedulerUtil does)
+         $warning =~ s/^NOTICE:\s*/INFO: /;
+         print STDOUT $warning;
+     }
+     elsif( $warning and $warning =~ m/^WARNING:/ )
+     {
+         # print the modifed message to STDOUT (as SchedulerUtil does)
+         $warning =~ s/^WARNING:\s*/DEVWARN: /;
+         print STDOUT $warning;
+     }
+     else
+     {
+         # warn the message
+         CORE::warn( $warning );
+     }
+
+     return;
+};
+
 $handle->do( "SET application_name = 'cyanaudit_log_rotate.pl'" );
 
 ################
@@ -82,27 +107,27 @@ unless( $opts{'P'} )
 
     if( !defined( $table_name ) )
     {
-        print "No events to rotate. Skipping creation of new logging partition.\n";
+        print "INFO: No events to rotate. Skipping creation of new logging partition.\n";
     }
     else
     {
-        print "Created new partition cyanaudit.$table_name\n";
+        print "INFO: Created new partition cyanaudit.$table_name\n";
 
-        print "Setting up and activating new partition... ";
+        print "INFO: Setting up and activating new partition...\n";
         $handle->do( "select cyanaudit.fn_verify_partition_config( ? )", undef, $table_name );
         $handle->do( "select cyanaudit.fn_activate_partition( ? )", undef, $table_name );
-        print "Done.\n";
+        print "INFO: Done.\n";
 
         $handle->do("commit");
 
         &wait_for_open_transactions_to_finish( $handle );
 
-        print "Temporarily removing inheritance on old partition.\n";
+        print "INFO: Temporarily removing inheritance on old partition.\n";
         $handle->do( "select cyanaudit.fn_setup_partition_inheritance( ?, true )", undef, $old_table_name );
 
-        print "Setting constraints, archiving, and reinstating inheritance on old partition...";
+        print "INFO: Setting constraints, archiving, and reinstating inheritance on old partition...\n";
         $handle->do( "select cyanaudit.fn_verify_partition_config( ? )", undef, $old_table_name );
-        print "Done.\n";
+        print "INFO: Done.\n";
     }
 }
 
@@ -122,9 +147,9 @@ if( $opts{'n'} or $opts{'s'} or $opts{'a'} )
 
     for my $table ( @$tables )
     {
-        print "Dropping $table... ";
+        print "INFO: Dropping $table...\n";
         $handle->do( "SELECT cyanaudit.fn_setup_partition_inheritance( ?, true )", undef, $table );
         $handle->do( "DROP TABLE cyanaudit.$table" );
-        print "Done.\n";
+        print "INFO: Done.\n";
     }
 }
