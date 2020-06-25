@@ -1575,7 +1575,7 @@ ON CONFLICT DO NOTHING;
 
 
 INSERT INTO cyanaudit.tb_config (name, value)
-     VALUES ('version', '2.2.1')
+     VALUES ('version', '2.2.2')
 ON CONFLICT (name) DO UPDATE 
         SET value = EXCLUDED.value 
       WHERE cyanaudit.tb_config.name = EXCLUDED.name;
