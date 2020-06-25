@@ -16,9 +16,7 @@ Basic Usage
 
 Install Cyan Audit:
 
-    $ tar zxvf cyanaudit-X.X.zip
-    $ cd cyanaudit-X.X
-    $ ./install.pl -d dbname [ -h dbhost -p dbport -U dbuser ]
+    $ Execute sql statemens from `cyanaudit.sql` on your server.
 
 Turn on logging for schemas `public` and `app_schema`:
 
@@ -168,15 +166,7 @@ Reinstalling or Upgrading Cyan Audit In Place
 
 If you wish to reinstall Cyan Audit without dropping it, simply re-run the
 install script and it will automatically re-install the same version you
-currently have installed:
-
-    ./install.pl -d app_db -U postgres
-
-If you'd like to upgrade an existing installation, simply use the -V flag with
-the version you'd like to install:
-    
-    ./install.pl -d app_db -U postgres -V 2.2
-
+currently have installed.
 
 Uninstalling Cyan Audit
 =======================
@@ -186,8 +176,6 @@ Cyan Audit lives entirely in the cyanaudit schema, and can be dropped as follows
     psql> DROP SCHEMA cyanaudit CASCADE
 
 Cyan Audit's scripts can be removed as follows:
-
-    # rm /var/lib/psql-X.X/bin/[cC]yanaudit*
 
 
 Removing & Reinstalling Cyan Audit
@@ -201,13 +189,13 @@ all of your logs, remove, reinstall and restore the logs, as follows:
 2.  Back up all logs using `cyanaudit_dump.pl`
 3.  Shut down database access (e.g. by turning off pgbouncer)
 4.  Run `cyanaudit_dump.pl` again to catch the last bit of logs
-5.  Install new cyanaudit scripts using `./install.pl` from cyanaudit directory
+5.  Install new cyanaudit scripts by executing the sql statemens from `cyanaudit.sql`
 6.  Create backup of `cyanaudit.tb_audit_field` (for the enabled values) and
     `cyanaudit.tb_config` for the new installation:  
     `CREATE TABLE public.tb_audit_field_backup AS SELECT * FROM cyanaudit.tb_audit_field;`  
     `CREATE TABLE public.tb_cyanaudit_config_backup AS SELECT * FROM cyanaudit.tb_config;` 
 7.  `DROP SCHEMA cyanaudit CASCADE;`
-8.  `./install.pl -d app_db -h localhost`
+8.  Execute sql statemens from `cyanaudit.sql`
 9.  `select fn_update_audit_fields('public')` # (Also run this for any other schema being logged)
 10. Restore the configs from your backups of tb_audit_field and tb_config:  
     ```
