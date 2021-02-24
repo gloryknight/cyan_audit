@@ -1,7 +1,7 @@
 Cyan Audit T
 ============
 
-This is a fork of Cyan Audit to work with PostgreSQL 12.0 and above. Cyan Audit is a PostgreSQL utility providing comprehensive and
+This is a fork of CyanAudit to work with PostgreSQL 12.0 and above. Cyan Audit is a PostgreSQL utility providing comprehensive and
 easily-searchable logs of DML (INSERT/UPDATE/DELETE) activity in your database.
 
 With Cyan Audit you can:
