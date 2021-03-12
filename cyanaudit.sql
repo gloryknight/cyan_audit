@@ -1490,6 +1490,34 @@ returns setof text as
  $_$
     language sql strict;
 
+-- fn_rotate_partition_new
+CREATE OR REPLACE FUNCTION cyanaudit.fn_rotate_partition_new()
+returns varchar as
+ $_$
+declare
+    old_table_name   varchar;
+    table_name   varchar;
+begin
+    old_table_name := cyanaudit.fn_get_active_partition_name();
+    table_name := cyanaudit.fn_create_new_partition();
+
+    if table_name is null then
+        -- No events to rotate. Skipping creation of new logging partition
+        return null;
+    end if;
+
+    perform cyanaudit.fn_verify_partition_config( table_name );
+    perform cyanaudit.fn_activate_partition( table_name );
+    --- perform pg_sleep(20);
+    perform cyanaudit.fn_setup_partition_inheritance( old_table_name, true );
+    execute format( 'ALTER TABLE cyanaudit.%I DROP constraint partition_range_chk', old_table_name );
+    perform cyanaudit.fn_verify_partition_config( old_table_name );
+    return table_name;
+
+end
+ $_$
+    language plpgsql;
+
 --------------------
 ------ VIEWS -------
 --------------------
